@@ -32,34 +32,41 @@ export async function hydrateStateFromDisk(currentState) {
       for (const f of jsonFiles) {
         const data = await readJSONFile(f.handle);
         if (!data) continue;
-        const roomNum = Number(data.room);
-        const floorNum = String(roomNum)[0];
-        const floorArr = next.floors[floorNum];
-        if (!floorArr) continue;
+        // Support both single room (number/string) and array of rooms
+        const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+        for (const roomNum of rooms) {
+          const floorNum = String(roomNum)[0];
+          const floorArr = next.floors[floorNum];
+          if (!floorArr) continue;
 
-        next.floors[floorNum] = floorArr.map(r =>
-          r.number === roomNum
-            ? {
-                ...r,
-                status: 'occupied',
-                guest: {
-                  name: data.name || 'Guest',
-                  contact: data.contact || '',
-                  id: data.id || '',
-                  checkIn: data.checkIn || new Date().toISOString()
-                },
-                rate: data.rate || r.rate
-              }
-            : r
-        );
+          next.floors[floorNum] = floorArr.map(r =>
+            r.number === roomNum
+              ? {
+                  ...r,
+                  status: 'occupied',
+                  guest: {
+                    name: data.name || 'Guest',
+                    contact: data.contact || '',
+                    id: data.id || '',
+                    checkIn: data.checkIn || new Date().toISOString(),
+                    checkInDate: data.checkInDate || null,
+                    checkInTime: data.checkInTime || null,
+                    rate: data.rate || r.rate,
+                    edited: Boolean(data.edited)
+                  }
+                }
+              : r
+          );
 
-        next.guests.push({
-          room: roomNum,
-          name: data.name,
-          contact: data.contact,
-          id: data.id,
-          checkIn: data.checkIn
-        });
+          next.guests.push({
+            room: roomNum,
+            name: data.name,
+            contact: data.contact,
+            id: data.id,
+            checkIn: data.checkIn,
+            edited: Boolean(data.edited)
+          });
+        }
       }
     }
   } catch (err) {

@@ -53,8 +53,8 @@ floors[f].push({ number, status: "free", guest: null, reservedFor: null });
 }
   // sample data
   floors[1][1].status = 'reserved'; floors[1][1].reservedFor = { name: 'A. Kumar', from: '2025-08-15' };
-  floors[2][2].status = 'occupied'; floors[2][2].guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123' };
-  floors[3][0].status = 'occupied'; floors[3][0].guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998' };
+  floors[2][2].status = 'occupied'; floors[2][2].guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123', rate: 1500 };
+  floors[3][0].status = 'occupied'; floors[3][0].guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998', rate: 2000 };
   return { floors, guests: [] };
 };
 
@@ -138,12 +138,17 @@ const todayISO = ymd();
 }
 
   // Recent check-ins list
-  const recent = [];
+  // Recent check-ins list (group by guest so multi-room bookings show as one)
+  const recentMap = new Map();
   for (const arr of Object.values(floors)) {
     for (const r of arr) {
-      if (r.guest) recent.push({ room: r.number, guest: r.guest });
+      if (!r.guest) continue;
+      const key = `${r.guest.name}::${r.guest.checkIn || ''}`;
+      if (!recentMap.has(key)) recentMap.set(key, { guest: r.guest, rooms: [] });
+      recentMap.get(key).rooms.push(r.number);
     }
   }
+  const recent = Array.from(recentMap.values()).map(x => ({ guest: x.guest, room: x.rooms.join(', ') }));
 
   // Today's reservations
   
@@ -435,40 +440,80 @@ function FloorsContainer({ state, setState }) {
   );
 }
 
-function CheckIn({ state, setState, locationState }) {
+// Helper functions
+const pad2 = (n) => String(n).padStart(2, "0");
+const fmtDate = (d = new Date()) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+const fmtTime = (d = new Date()) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 
-  
-const location = useLocation();
-
-useEffect(() => {
-  if (location.state?.prefName || location.state?.prefRoom) {
-    setForm(f => ({
-      ...f,
-      name: location.state.prefName || f.name,
-      room: location.state.prefRoom || f.room
-    }));
-    setSelectedRoom(location.state.prefRoom || null);
-
-    // Optional: trigger past guest search right away
-    if (location.state.prefName && location.state.prefName.length >= 2) {
-      nameFocusedRef.current = true;
-      searchGuestMatches(location.state.prefName);
+async function fetchRateFromCheckin(room, guestName, checkInDate) {
+  try {
+    const base = await getBaseFolder();
+    if (!base) return 0;
+    const dir = await ensurePath(base, ["Checkins", checkInDate]);
+    const safeName = guestName.toLowerCase().replace(/[^\w\-]+/g, "_");
+    for await (const [fileName, fileHandle] of dir.entries()) {
+      if (fileHandle.kind !== "file") continue;
+      if (fileName.toLowerCase().includes(`-${room}-`) && fileName.toLowerCase().includes(safeName)) {
+        const file = await fileHandle.getFile();
+        const data = JSON.parse(await file.text());
+        return Number(data.rate) || 0;
+      }
     }
+  } catch (err) {
+    console.warn("Rate lookup failed", err);
   }
-}, [location.state]);
+  return 0;
+}
 
-   const navigate = useNavigate();
+
+function CheckIn({ state, setState, locationState }) {
+  const ymd = (d = new Date()) => d.toISOString().slice(0, 10);
+  const location = useLocation();
+  const navigate = useNavigate();
   const todayISO = ymd();
 
-  const [form, setForm] = useState({ name: "", contact: "", room: "", rate: "" });
+  const [form, setForm] = useState({ name: "", contact: "", room: [], rate: "" });
   const [scanFile, setScanFile] = useState(null);
+  const [scanPreviewUrl, setScanPreviewUrl] = useState(null);
+  const [tempPending, setTempPending] = useState(null); // { file, name, tempName, tempHandle, group }
+  const [tempPreviewUrl, setTempPreviewUrl] = useState(null);
+  const [showTempModal, setShowTempModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [guestMatches, setGuestMatches] = useState([]);
   const [successMsg, setSuccessMsg] = useState("");
-
-
+  const [occupiedRooms, setOccupiedRooms] = useState([]);
+  const [editGuest, setEditGuest] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editRoomsInput, setEditRoomsInput] = useState("");
+  const [editNameInput, setEditNameInput] = useState("");
+  const [editRateInput, setEditRateInput] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewFileName, setPreviewFileName] = useState(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [conflictMsg, setConflictMsg] = useState(null);
+  const [guestSearch, setGuestSearch] = useState("");
+  const [scannedMap, setScannedMap] = useState({}); // key -> boolean
+  const [paymentsMap, setPaymentsMap] = useState({}); // key -> number
+  const [refreshKey, setRefreshKey] = useState(0);
+  
   const nameFocusedRef = useRef(false);
   const searchTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    if (location.state?.prefName || location.state?.prefRoom) {
+      setForm(f => ({
+        ...f,
+        name: location.state.prefName || f.name,
+        room: location.state.prefRoom ? (Array.isArray(location.state.prefRoom) ? location.state.prefRoom : [location.state.prefRoom]) : f.room
+      }));
+      setSelectedRoom(location.state.prefRoom || null);
+
+      if (location.state.prefName && location.state.prefName.length >= 2) {
+        nameFocusedRef.current = true;
+        searchGuestMatches(location.state.prefName);
+      }
+    }
+  }, [location.state]);
 
   // Build room grid
   const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
@@ -481,32 +526,512 @@ useEffect(() => {
     });
   });
 
-  // Occupied list
-  const occupiedRooms = [];
-  Object.values(state.floors).forEach(arr => {
-    arr.forEach(r => { if (r.status === "occupied") occupiedRooms.push(r); });
-  });
+  useEffect(() => {
+  (async () => {
+    // Group occupied rooms by guest (name + checkIn) so multi-room bookings appear as one entry
+    const map = new Map();
+    for (const arr of Object.values(state.floors)) {
+      for (const r of arr) {
+        if (r.status === "occupied" && r.guest) {
+          let guestData = { ...r.guest };
+          if (!guestData.rate) {
+            const checkInDate = (guestData.checkIn || "").slice(0, 10) || ymd(new Date());
+            const fetchedRate = await fetchRateFromCheckin(r.number, guestData.name, checkInDate);
+            guestData.rate = fetchedRate;
+          }
+          const key = `${guestData.name}::${guestData.checkIn || ''}`;
+          if (!map.has(key)) map.set(key, { guest: guestData, rooms: [] });
+          map.get(key).rooms.push(r.number);
+        }
+      }
+    }
+    const grouped = Array.from(map.values()).map(g => ({
+      guest: g.guest,
+      rooms: g.rooms.sort((a,b)=>a-b)
+    }));
+    setOccupiedRooms(grouped);
+  })();
+}, [state.floors, refreshKey]);
+
+  // Open the edit modal for a grouped guest
+  const openEditModal = (group) => {
+    setEditGuest(group);
+    setEditNameInput(group.guest?.name || "");
+    setEditRateInput(String(group.guest?.rate || ""));
+    setEditRoomsInput((group.rooms || []).join(', '));
+    setShowEditModal(true);
+  };
+
+  // Save edits: update in-memory state, localStorage, and persist to Checkins JSON on disk
+  const saveEditChanges = async () => {
+    if (!editGuest) return;
+    const origRooms = (editGuest.rooms || []).map(Number);
+    // parse rooms input
+    const parsed = String(editRoomsInput || "").split(',').map(s => Number(s.trim())).filter(Boolean);
+    if (parsed.length === 0) return alert('Please provide at least one room');
+
+    // check for conflicts: any newly requested room occupied by someone else
+    const newRooms = parsed;
+    const occupiedByOthers = [];
+    for (const floorArr of Object.values(state.floors)) {
+      for (const r of floorArr) {
+        if (newRooms.includes(r.number)) {
+          // allow if it's part of original group
+          if (!origRooms.includes(r.number) && r.status === 'occupied') occupiedByOthers.push(r.number);
+        }
+      }
+    }
+    if (occupiedByOthers.length) {
+      setConflictMsg('Rooms already occupied: ' + occupiedByOthers.join(', '));
+      return;
+    }
+
+    const newState = { ...state, floors: { ...state.floors } };
+
+    // free original rooms (unless they are also in newRooms)
+    Object.keys(newState.floors).forEach(fnum => {
+      newState.floors[fnum] = newState.floors[fnum].map(r => {
+        if (origRooms.includes(r.number) && !newRooms.includes(r.number)) {
+          return { ...r, status: 'free', guest: null };
+        }
+        return r;
+      });
+    });
+
+    // occupy new rooms with updated guest info
+    const updatedGuest = {
+      ...editGuest.guest,
+      name: editNameInput,
+  rate: Number(editRateInput) || 0,
+  edited: true
+    };
+
+    Object.keys(newState.floors).forEach(fnum => {
+      newState.floors[fnum] = newState.floors[fnum].map(r => {
+        if (newRooms.includes(r.number)) {
+          return { ...r, status: 'occupied', guest: { ...updatedGuest, checkIn: r.guest?.checkIn || editGuest.guest?.checkIn, checkInDate: editGuest.guest?.checkInDate, checkInTime: editGuest.guest?.checkInTime } };
+        }
+        return r;
+      });
+    });
+
+    // Update app state and persist to localStorage first
+    setState(newState);
+    saveState(newState);
+
+    // Then attempt to update the on-disk checkin JSON file for this booking (if storage connected)
+    try {
+      const base = await getBaseFolder();
+      if (base) {
+        const checkInISO = (editGuest.guest?.checkIn || '').slice(0,10) || ymd(new Date());
+        const checkinDir = await ensurePath(base, ['Checkins', checkInISO]);
+        let foundOld = null;
+        for await (const [entryName, entryHandle] of checkinDir.entries()) {
+          if (entryHandle.kind !== 'file' || !entryName.endsWith('.json')) continue;
+          try {
+            const f = await entryHandle.getFile();
+            const data = JSON.parse(await f.text());
+            const dataName = String(data.name || '').trim().toLowerCase();
+            const origName = String(editGuest.guest?.name || '').trim().toLowerCase();
+            const dataRooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+            // Match by original name and at least one overlapping room
+            if (dataName === origName && dataRooms.some(r => origRooms.includes(r))) {
+              foundOld = { entryName, data };
+              break;
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+
+        if (foundOld) {
+          const newData = {
+            ...foundOld.data,
+            name: editNameInput,
+            room: newRooms,
+            rate: Number(editRateInput) || Number(foundOld.data.rate) || 0,
+            edited: true
+          };
+          const safe = String(editNameInput).replace(/[^\w\-]+/g, "_");
+          const roomsKeyNew = newRooms.join('_');
+          const newFileName = `checkin-${safe}-${roomsKeyNew}-${checkInISO}.json`;
+          await writeJSON(checkinDir, newFileName, newData);
+          // remove the old file if name changed
+          if (foundOld.entryName !== newFileName) {
+            try { await checkinDir.removeEntry(foundOld.entryName); } catch (e) { console.warn('Failed to remove old checkin file', e); }
+          }
+          // Also update RentCollections so previous payments map to the new rooms
+          try {
+            const rentRoot = await ensurePath(base, ['RentCollections']);
+            for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
+              if (dateHandle.kind !== 'directory') continue;
+              for await (const [rentFileName, rentFileHandle] of dateHandle.entries()) {
+                if (rentFileHandle.kind !== 'file' || !rentFileName.endsWith('.json')) continue;
+                try {
+                  const rf = await rentFileHandle.getFile();
+                  const rentData = JSON.parse(await rf.text());
+                  const paidRooms = Array.isArray(rentData.room) ? rentData.room.map(Number) : [Number(rentData.room)];
+                  const paidName = String(rentData.name || '').trim().toLowerCase();
+                  const origName = String(editGuest.guest?.name || '').trim().toLowerCase();
+                  const intersects = paidRooms.some(pr => origRooms.includes(Number(pr)));
+                  if (intersects && paidName === origName) {
+                    // update the rent entry's room to refer to the new rooms (group)
+                    const updatedRent = { ...rentData, room: newRooms };
+                    try {
+                      await writeJSON(dateHandle, rentFileName, updatedRent);
+                    } catch (err) {
+                      console.warn('Failed to update rent file', rentFileName, err);
+                    }
+                  }
+                } catch (err) {
+                  continue;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to update RentCollections for edited booking', err);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to persist edit to disk:', err);
+    }
+
+    setShowEditModal(false);
+    setEditGuest(null);
+  // trigger refresh of occupiedRooms/payment/scanned checks
+  setRefreshKey(k => k + 1);
+  };
+
+  // Search ScannedDocuments for a matching file and open preview modal
+  const openGuestPreview = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+      const safe = String(group.guest?.name || '').replace(/[\W_]+/g, '_').toLowerCase();
+      let foundHandle = null;
+      let foundName = null;
+
+      async function recurse(dir) {
+        for await (const [entryName, entryHandle] of dir.entries()) {
+          if (entryHandle.kind === 'directory') {
+            await recurse(entryHandle);
+            if (foundHandle) return;
+          } else if (entryHandle.kind === 'file') {
+            if (entryName.toLowerCase().includes(safe)) {
+              foundHandle = entryHandle;
+              foundName = entryName;
+              return;
+            }
+          }
+        }
+      }
+
+      await recurse(scannedRoot);
+      if (!foundHandle) return alert('No scanned document found for this guest');
+      const file = await foundHandle.getFile();
+      const url = URL.createObjectURL(file);
+      setPreviewFileName(foundName);
+      setPreviewUrl(url);
+      setShowPreviewModal(true);
+    } catch (err) {
+      console.warn('Preview open failed', err);
+      alert('Failed to open scanned document');
+    }
+  };
+
+  // Compute a key to identify a guest group
+  const groupKey = (group) => `${String(group.guest?.name||'').toLowerCase()}::${(group.guest?.checkIn||'').slice(0,10)}`;
+
+  // Check ScannedDocuments for each occupied group and set scannedMap
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+        const newMap = { ...scannedMap };
+        for (const g of occupiedRooms) {
+          const safe = String(g.guest?.name || '').replace(/[\W_]+/g, '_').toLowerCase();
+          let found = false;
+          async function recurse(dir) {
+            for await (const [entryName, entryHandle] of dir.entries()) {
+              if (found) return;
+              if (entryHandle.kind === 'directory') {
+                await recurse(entryHandle);
+              } else if (entryHandle.kind === 'file') {
+                if (entryName.toLowerCase().includes(safe)) { found = true; return; }
+              }
+            }
+          }
+          await recurse(scannedRoot);
+          newMap[groupKey(g)] = found;
+        }
+        setScannedMap(newMap);
+      } catch (err) {
+        // ignore
+      }
+    })();
+  }, [occupiedRooms]);
+
+  // Compute total payments for each occupied group from RentCollections (from checkIn date to today)
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const rentRoot = await ensurePath(base, ['RentCollections']);
+
+        const todayISO = (new Date()).toISOString().slice(0,10);
+        const map = {};
+
+        // Prepare groups for quick checks
+        const groups = occupiedRooms.map(g => ({
+          key: groupKey(g),
+          name: String(g.guest?.name || '').trim().toLowerCase(),
+          rooms: new Set((g.rooms || []).map(Number)),
+          since: (g.guest?.checkIn || '').slice(0,10) || todayISO
+        }));
+
+        for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
+          if (dateHandle.kind !== 'directory') continue;
+
+          // For each file in this date folder
+          for await (const [fileName, fileHandle] of dateHandle.entries()) {
+            if (fileHandle.kind !== 'file' || !fileName.endsWith('.json')) continue;
+            try {
+              const f = await fileHandle.getFile();
+              const data = JSON.parse(await f.text());
+              const paidName = String(data.name || '').trim().toLowerCase();
+              const paidRooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+              const amount = Number(data.amount) || 0;
+
+              // Check this rent entry against each group
+              for (const grp of groups) {
+                // Only consider entries between group's checkin and today
+                if (dateFolder < grp.since || dateFolder > todayISO) continue;
+                if (paidName !== grp.name) continue;
+                const intersects = paidRooms.some(pr => grp.rooms.has(Number(pr)));
+                if (intersects) {
+                  map[grp.key] = (map[grp.key] || 0) + amount;
+                }
+              }
+            } catch (err) {
+              // skip bad files
+              continue;
+            }
+          }
+        }
+
+        setPaymentsMap(map);
+      } catch (err) {
+        console.warn('Failed to compute payments map', err);
+      }
+    })();
+  }, [occupiedRooms]);
+
+  // Attach a scanned file to a guest group: try scanner temp, else pick file, then write to ScannedDocuments
+  const attachScanToGuest = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+
+      // non-blocking: ask native scanner to open if available
+      try {
+        if (window.__TAURI__ && typeof window.__TAURI__.invoke === 'function') {
+          window.__TAURI__.invoke('open_scanner_ui').catch(() => {});
+        }
+      } catch (e) { /* ignore */ }
+
+      // Try reading from _ScannerTemp (if present). Be defensive: if any step fails, fall back to picker.
+      let fileToSave = null;
+      let fileName = null;
+      try {
+        const tempDir = await ensurePath(base, ['_ScannerTemp']);
+        let latest = null;
+        let latestTime = 0;
+        let latestName = null;
+        for await (const [name, handle] of tempDir.entries()) {
+          try {
+            if (handle.kind === 'file' && /\.(jpg|jpeg|png|pdf)$/i.test(name)) {
+              const file = await handle.getFile();
+              if (file && file.lastModified > latestTime) {
+                latestTime = file.lastModified; latest = file; latestName = name; }
+            }
+          } catch (e) {
+            // ignore single file errors and continue scanning
+            console.warn('Error reading temp entry', name, e);
+            continue;
+          }
+        }
+        if (latest) {
+          // Instead of immediately saving, open a preview popup showing the temp file.
+          try {
+            const url = URL.createObjectURL(latest);
+            setTempPending({ file: latest, name: latestName, tempHandle: null, tempName: latestName, tempHandleRef: null, group });
+            setTempPreviewUrl(url);
+            setShowTempModal(true);
+            return; // wait for user's confirmation to save
+          } catch (e) {
+            // if preview creation fails, fall back to immediate save path
+            console.warn('Failed to preview temp file, will fallback to save', e);
+            fileToSave = latest; fileName = latestName;
+          }
+        }
+      } catch (e) {
+        // Could not read _ScannerTemp (not present or permission); fall back to file picker
+        console.warn('Scanner temp read failed, will fallback to picker', e);
+      }
+
+      if (!fileToSave) {
+        // pick file from user and show the same preview + OK modal as scanner temp
+        if (window.showOpenFilePicker) {
+          try {
+            const [handle] = await window.showOpenFilePicker({ multiple: false, types: [{ description: 'Images or PDF', accept: {'image/*':['.png','.jpg','.jpeg'], 'application/pdf':['.pdf']} }] });
+            const file = await handle.getFile();
+            fileToSave = file; fileName = handle.name || file.name;
+          } catch (err) {
+            // user probably cancelled
+            console.warn('File picker cancelled or failed', err);
+            return;
+          }
+        } else {
+          const picked = await new Promise((resolve) => {
+            const input = document.createElement('input'); input.type = 'file'; input.accept = '.jpg,.jpeg,.png,.pdf,image/*'; input.style.display = 'none'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null); document.body.appendChild(input); input.click(); setTimeout(() => document.body.removeChild(input), 1000);
+          });
+          if (!picked) return; fileToSave = picked; fileName = picked.name;
+        }
+
+        // Create a preview and ask user to confirm saving (same UX as scanner temp)
+        try {
+          const url = URL.createObjectURL(fileToSave);
+          setTempPending({ file: fileToSave, name: fileName, tempName: null, tempHandle: null, group });
+          setTempPreviewUrl(url);
+          setShowTempModal(true);
+          return; // wait for confirmation
+        } catch (e) {
+          console.warn('Failed to preview picked file, will fallback to immediate save', e);
+          // fallthrough to immediate save below
+        }
+      }
+
+      if (!fileToSave) throw new Error('No file to save');
+
+  // Use the same destination logic as the Check-In flow: save under today's ScannedDocuments folder
+  const now = new Date();
+  const todayISOstr = ymd(now);
+  const year = String(now.getFullYear());
+  const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+  const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
+
+  const safeName = String(group.guest?.name || '').replace(/[^\w\-]+/g, '_').toLowerCase() || 'guest';
+  const roomsKey = (group.rooms || []).join('_') || 'rooms';
+  const rawExt = (fileName && fileName.includes('.')) ? fileName.split('.').pop() : (fileToSave.name && fileToSave.name.split('.').pop()) || 'jpg';
+  const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'jpg';
+  let candidate = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`;
+  // final sanitation: allow only safe filename chars
+  const newFileName = candidate.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      try {
+        await writeFile(scansDir, newFileName, fileToSave);
+      } catch (e) {
+        console.error('Failed writing scan file', e);
+        return alert('Failed to save scanned file: ' + (e?.message || String(e)));
+      }
+
+      // mark map and show a small success message (no post-save preview required)
+      setScannedMap(m => ({ ...m, [groupKey(group)]: true }));
+      setSuccessMsg('Scanned document saved');
+      setTimeout(() => setSuccessMsg(''), 2500);
+    } catch (err) {
+      console.warn('Attach scan failed', err);
+      alert('Failed to attach scan: ' + (err?.message || String(err)));
+    }
+  };
+
+  // User confirms saving the temp scanned file to ScannedDocuments and deletion from _ScannerTemp
+  const saveTempScanConfirmed = async () => {
+    if (!tempPending) return;
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+
+  const { group, file, tempName } = tempPending;
+  // Use today's folder and filename pattern (same as Check-In flow)
+  const now = new Date();
+  const todayISOstr = ymd(now);
+  const year = String(now.getFullYear());
+  const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+  const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
+
+  const safeName = String(group.guest?.name || '').replace(/[^\w\-]+/g, '_').toLowerCase() || 'guest';
+  const roomsKey = (group.rooms || []).join('_') || 'rooms';
+  const rawExt = (tempPending.name && tempPending.name.includes('.')) ? tempPending.name.split('.').pop() : (file.name && file.name.split('.').pop()) || 'jpg';
+  const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'jpg';
+  const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  await writeFile(scansDir, newFileName, file);
+
+      // delete temp entry (best-effort)
+      try {
+        const tempDir = await ensurePath(base, ['_ScannerTemp']);
+        await tempDir.removeEntry(tempName);
+      } catch (e) {
+        console.warn('Failed to delete temp scan after save', e);
+      }
+
+  setScannedMap(m => ({ ...m, [groupKey(group)]: true }));
+  setSuccessMsg('Scanned document saved');
+  setTimeout(() => setSuccessMsg(''), 2500);
+    } catch (err) {
+      console.error('Save temp failed', err);
+      alert('Failed to save scanned file: ' + (err?.message || String(err)));
+    } finally {
+      // cleanup temp modal state
+      if (tempPreviewUrl) { URL.revokeObjectURL(tempPreviewUrl); setTempPreviewUrl(null); }
+      setTempPending(null);
+      setShowTempModal(false);
+    }
+  };
+
+  const cancelTempPreview = () => {
+    if (tempPreviewUrl) URL.revokeObjectURL(tempPreviewUrl);
+    setTempPreviewUrl(null);
+    setTempPending(null);
+    setShowTempModal(false);
+  };
+
+  // Cleanup preview URL when modal closes
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const handleRoomClick = (room) => {
-  if (room.status === "occupied") return;
-
-  // Prefill name from reservation
-  const reservedName = room.status === "reserved" ? (room.reservedFor?.name || "") : "";
-  setSelectedRoom(room.number);
-  setForm(f => ({
-    ...f,
-    room: room.number,
-    name: reservedName || f.name
-  }));
-
-  setGuestMatches([]); // close any old dropdown
-
-  // 🔹 If reservedName exists, trigger async search
-  if (reservedName && reservedName.length >= 2) {
-    nameFocusedRef.current = true; // so dropdown will render
-    searchGuestMatches(reservedName);
-  }
-};
+    if (room.status === "occupied") return;
+    const reservedName = room.status === "reserved" ? (room.reservedFor?.name || "") : "";
+    setSelectedRoom(room.number);
+    setForm(f => {
+      const existing = Array.isArray(f.room) ? f.room : (f.room ? [f.room] : []);
+      // toggle selection
+      const idx = existing.indexOf(room.number);
+      const nextRooms = idx === -1 ? [...existing, room.number] : existing.filter(x => x !== room.number);
+      return {
+        ...f,
+        room: nextRooms,
+        name: reservedName || f.name
+      };
+    });
+    setGuestMatches([]);
+    if (reservedName && reservedName.length >= 2) {
+      nameFocusedRef.current = true;
+      searchGuestMatches(reservedName);
+    }
+  };
 
   async function deleteReservationFile(date, room, name) {
     try {
@@ -514,38 +1039,32 @@ useEffect(() => {
       if (!base) return;
       const dir = await ensurePath(base, ["Reservations", date]);
       const safe = String(name).replace(/[^\w\-]+/g, "_");
-      await dir.removeEntry(`reservation-${room}-${safe}.json`);
+  await dir.removeEntry(`reservation-${room}-${safe}.json`);
     } catch (err) {
       console.warn("Failed to delete reservation file", err);
     }
   }
 
-  // Recursively search scans
   async function searchScansRecursively(dirHandle, safeQuery, results, query) {
     for await (const [entryName, entryHandle] of dirHandle.entries()) {
       if (entryHandle.kind === "directory") {
         await searchScansRecursively(entryHandle, safeQuery, results, query);
       } else if (entryHandle.kind === "file") {
         if (entryName.toLowerCase().includes(safeQuery)) {
-  // Remove extension
-  let baseName = entryName.replace(/\.[^/.]+$/, "");
-  baseName = baseName.replace(/_/g, " "); // underscores → spaces
-  // Get only part before first "-" or "/" or space+digit (room no)
-  let nameOnly = baseName.split(/[-/]| \d/)[0].trim();
-
-  results.push({
-    source: "scanfile",
-    name: nameOnly || query,
-    contact: "",
-    room: "",
-    scanInfo: { name: nameOnly || query, fileName: entryName, fileHandle: entryHandle }
-  });
-}
+          let baseName = entryName.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+          let nameOnly = baseName.split(/[-/]| \d/)[0].trim();
+          results.push({
+            source: "scanfile",
+            name: nameOnly || query,
+            contact: "",
+            room: "",
+            scanInfo: { name: nameOnly || query, fileName: entryName, fileHandle: entryHandle }
+          });
+        }
       }
     }
   }
 
-  // Search guest matches
   async function searchGuestMatches(query) {
     if (!nameFocusedRef.current || !query || query.length < 2) {
       setGuestMatches([]);
@@ -557,7 +1076,7 @@ useEffect(() => {
       const results = [];
       const safeQuery = query.toLowerCase().replace(/[^\w\-]+/g, "_");
 
-      // From Checkouts JSON
+      // From Checkouts
       const checkoutsRoot = await ensurePath(base, ["Checkouts"]);
       for await (const [dateFolder, dateHandle] of checkoutsRoot.entries()) {
         if (dateHandle.kind === "directory") {
@@ -571,7 +1090,7 @@ useEffect(() => {
                   name: data.name,
                   contact: data.contact || "",
                   room: data.room,
-                  scanInfo: { checkInDate: data.checkIn?.slice(0, 10) || dateFolder, name: data.name }
+                  scanInfo: { checkInDate: data.checkInDate || dateFolder, checkInTime: data.checkInTime || "", name: data.name }
                 });
               }
             }
@@ -579,146 +1098,165 @@ useEffect(() => {
         }
       }
 
-      // From anywhere in ScannedDocuments
+      // From ScannedDocuments
       const scannedRoot = await ensurePath(base, ["ScannedDocuments"]);
       await searchScansRecursively(scannedRoot, safeQuery, results, query);
 
-      if (nameFocusedRef.current) setGuestMatches(results); // only set if still focused
+      if (nameFocusedRef.current) setGuestMatches(results);
     } catch (err) {
       console.warn("Guest search failed:", err);
     }
   }
 
-  // Use a guest match (prefill + reuse scan)
   async function useGuestMatch(match) {
-  setForm(f => ({ ...f, name: match.name, contact: match.contact }));
-  setGuestMatches([]); // close dropdown
+    setForm(f => ({ ...f, name: match.name, contact: match.contact }));
+    setGuestMatches([]);
+    try {
+      const base = await getBaseFolder();
+      if (!base) return;
 
-  try {
-    const base = await getBaseFolder();
-    if (!base) return;
+      const safeName = match.scanInfo.name.replace(/[^\w\-]+/g, "_");
 
-    // SAFE guest name
-    const safeName = match.scanInfo.name.replace(/[^\w\-]+/g, "_");
-
-    if (match.source === "scanfile" && match.scanInfo.fileHandle) {
-  setScanFile({
-    reused: true,
-    fileHandle: match.scanInfo.fileHandle,
-    safeName,
-    name: match.scanInfo.fileName // ✅ use provided filename
-  });
-}
-    else if (match.source === "checkout" && match.scanInfo.checkInDate) {
-  const oldDate = match.scanInfo.checkInDate; // YYYY-MM-DD
-  const oldYear = oldDate.slice(0, 4);
-  const oldMonth = new Date(oldDate).toLocaleString("en-US", { month: "short" }).toLowerCase();
-  const oldDateFolder = `${oldDate.slice(8,10)}-${oldDate.slice(5,7)}-${oldDate.slice(0,4)}`;
-
-  const oldScanDir = await ensurePath(base, ["ScannedDocuments", oldYear, oldMonth, oldDateFolder]);
-  for await (const [entryName, entryHandle] of oldScanDir.entries()) {
-    if (entryHandle.kind === "file" && entryName.toLowerCase().includes(safeName.toLowerCase())) {
-      setScanFile({
-        reused: true,
-        fileHandle: entryHandle,
-        safeName,
-        name: entryName // ✅ store the filename for UI
-      });
-      console.log("Found old scan from checkout:", entryName);
-      break;
+      if (match.source === "scanfile" && match.scanInfo.fileHandle) {
+        setScanFile({
+          reused: true,
+          fileHandle: match.scanInfo.fileHandle,
+          safeName,
+          name: match.scanInfo.fileName
+        });
+      } else if (match.source === "checkout" && match.scanInfo.checkInDate) {
+        const oldDate = match.scanInfo.checkInDate;
+        const oldYear = oldDate.slice(6, 10); // dd/mm/yyyy → year
+        const oldMonth = oldDate.slice(3, 5); // dd/mm/yyyy → month
+        const oldDateFolder = `${oldDate.slice(0, 2)}-${oldMonth}-${oldYear}`;
+        const oldScanDir = await ensurePath(base, ["ScannedDocuments", oldYear, oldMonth, oldDateFolder]);
+        for await (const [entryName, entryHandle] of oldScanDir.entries()) {
+          if (entryHandle.kind === "file" && entryName.toLowerCase().includes(safeName.toLowerCase())) {
+            setScanFile({
+              reused: true,
+              fileHandle: entryHandle,
+              safeName,
+              name: entryName
+            });
+            console.log("Found old scan from checkout:", entryName);
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Scan reuse failed", err);
     }
   }
-}
 
-  } catch (err) {
-    console.warn("Scan reuse failed", err);
-  }
-}
-
-  // Save check-in data
   const saveCheckinData = async (guest) => {
-  const base = await getBaseFolder();
-  if (!base) return console.warn("Storage not connected.");
+    const base = await getBaseFolder();
+    if (!base) return console.warn("Storage not connected.");
 
-  const now = new Date();
-  const todayISOstr = ymd(now);
+    const now = new Date();
+    const todayISOstr = ymd(now);
 
-  // Save check‑in JSON
-  const dataDir = await ensurePath(base, ["Checkins", todayISOstr]);
-  await writeJSON(dataDir, `checkin-${guest.name}-${guest.room}-${todayISOstr}.json`, guest);
+    const dataDir = await ensurePath(base, ["Checkins", todayISOstr]);
+  // guest.room is array or single; normalize to array
+  const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
+  const roomsKey = roomsArr.join('_');
+  await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
 
-  const year = String(now.getFullYear());
-  const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
-  const dateFolder = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
-  const scansDir = await ensurePath(base, ["ScannedDocuments", year, month, dateFolder]);
+    const year = String(now.getFullYear());
+    const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
+    const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth()+1)}-${now.getFullYear()}`;
+    const scansDir = await ensurePath(base, ["ScannedDocuments", year, month, dateFolder]);
 
-  // If old scan is being reused
-  if (scanFile?.reused && scanFile?.fileHandle) {
-    const safeName = scanFile.safeName.replace(/[^\w\-]+/g, "_");
-    const ext = scanFile.fileHandle.name?.split(".").pop() || "jpg";
-    const newFileName = `${safeName}-${guest.room}-${todayISOstr}.${ext}`;
-    const file = await scanFile.fileHandle.getFile();
-    await writeFile(scansDir, newFileName, file);
-    console.log("Reused old scan saved:", newFileName);
-    return;
-  }
+    if (scanFile?.reused && scanFile?.fileHandle) {
+      const safeName = scanFile.safeName.replace(/[^\w\-]+/g, "_");
+      const ext = scanFile.fileHandle.name?.split(".").pop() || "jpg";
+      const newFileName = `${safeName}-${guest.room}-${todayISOstr}.${ext}`;
+      const file = await scanFile.fileHandle.getFile();
+      await writeFile(scansDir, newFileName, file);
+      console.log("Reused old scan saved:", newFileName);
+      return;
+    }
 
-  // If new scan uploaded
-  if (scanFile && !scanFile.reused) {
-    const ext = scanFile.name.includes(".") ? scanFile.name.split(".").pop() : "jpg";
-    await writeFile(scansDir, `${guest.name}-${guest.room}-${todayISOstr}.${ext}`, scanFile);
-  }
-};
+    if (scanFile && scanFile.file) {
+      const ext = scanFile.name && scanFile.name.includes(".") ? scanFile.name.split(".").pop() : "jpg";
+      const newFileName = `${guest.name}-${guest.room}-${todayISOstr}.${ext}`;
+      await writeFile(scansDir, newFileName, scanFile.file);
+      console.log("Saved scanned file:", newFileName);
 
-  // Submit form
+      // If this file was picked up from the temporary scanner folder, attempt to delete the temp entry
+      if (scanFile.tempName) {
+        try {
+          const tempDir = await ensurePath(base, ["_ScannerTemp"]);
+          await tempDir.removeEntry(scanFile.tempName);
+          console.log("Deleted temp scan:", scanFile.tempName);
+        } catch (err) {
+          console.warn("Failed to delete temp scan file:", err);
+        }
+      }
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.room) return alert("Select a room");
+  if (!form.room) return alert("Select a room");
+  if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
 
-    // ✅ Show success message
-setSuccessMsg(`Room ${form.room} reserved successfully`);
+    const now = new Date();
+    const checkInDate = now.toLocaleDateString();
+    const checkInTime = now.toLocaleTimeString();
 
-// ✅ Reset form and selection
-setForm({ name: "", contact: "", room: "",rate: "" });
-setSelectedRoom(null);
-setScanFile(null);
-
-// ✅ Hide message after 3 seconds
-setTimeout(() => setSuccessMsg(""), 3000);
+    setSuccessMsg(`Room ${form.room} reserved successfully`);
+    setForm({ name: "", contact: "", room: "", rate: "" });
+    setSelectedRoom(null);
+    setScanFile(null);
+    setTimeout(() => setSuccessMsg(""), 3000);
 
     const newState = { ...state, floors: { ...state.floors } };
+    const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
     Object.keys(newState.floors).forEach(fnum => {
       newState.floors[fnum] = newState.floors[fnum].map(r =>
-        r.number === Number(form.room)
-  ? { ...r, status: "occupied", guest: { name: form.name, contact: form.contact, checkIn: new Date().toISOString(), rate: Number(form.rate) || 0 } }
-
+        roomsToOccupy.includes(r.number)
+          ? {
+              ...r,
+              status: "occupied",
+              guest: {
+                name: form.name,
+                contact: form.contact,
+                checkIn: now.toISOString(),
+                checkInDate,    // ✅ human-readable
+                checkInTime,    // ✅ human-readable
+                rate: Number(form.rate) || 0
+              }
+            }
           : r
       );
     });
 
-    const reservationMatch = state.reservations?.find(r => r.room === Number(form.room) && r.date === todayISO);
-    if (reservationMatch) {
-      newState.reservations = state.reservations.filter(r => !(r.room === Number(form.room) && r.date === todayISO));
-      await deleteReservationFile(reservationMatch.date, reservationMatch.room, reservationMatch.name);
+    // Remove matching reservations for any of the rooms checked-in
+    const roomsSet = new Set(roomsToOccupy.map(Number));
+    const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
+    if (reservationMatches.length) {
+      newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
+      for (const rm of reservationMatches) {
+        await deleteReservationFile(rm.date, rm.room, rm.name);
+      }
     }
 
     setState(newState);
     saveState(newState);
+
     await saveCheckinData({
-  name: form.name,
-  contact: form.contact,
-  room: form.room,
-  checkIn: new Date().toISOString(),
-  rate: Number(form.rate) || 0
-});
-
-
-  
-    
+      name: form.name,
+      contact: form.contact,
+      room: roomsToOccupy,
+      checkIn: now.toISOString(),
+      checkInDate,
+      checkInTime,
+      rate: Number(form.rate) || 0
+    });
+  // refresh the grouped view so Current Guests updates immediately
+  setRefreshKey(k => k + 1);
   };
 
-  
-  // Helpers for color key and style
   const legendDot = (bg) => ({
     display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
     background: bg, marginRight: 6, border: '1px solid rgba(0,0,0,0.1)'
@@ -730,7 +1268,7 @@ setTimeout(() => setSuccessMsg(""), 3000);
       r.status === "occupied" ? "rgba(139, 224, 164, 0.6)" :
       "rgba(255, 255, 255, 0.6)";
     const isDisabled = r.status === "occupied";
-    const isSelected = selectedRoom === r.number;
+  const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
     return {
       cursor: isDisabled ? "not-allowed" : "pointer",
       height: 56,
@@ -747,250 +1285,452 @@ setTimeout(() => setSuccessMsg(""), 3000);
       transition: 'all 120ms ease',
       transform: isSelected ? 'translateY(-1px)' : 'none',
       opacity: isDisabled ? 0.85 : 1,
-      
     };
   };
 
   useEffect(() => () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }, []);
 
   async function scanFromLocalScanner() {
-  try {
-    const base = await getBaseFolder();
-    if (!base) return alert("Storage not connected");
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert("Storage not connected");
 
-    // Point to your scanner dump folder
-    const scanDir = await ensurePath(base, ["_ScannerTemp"]);
+      // If running inside Tauri, try to open the native scanner UI so the user can scan now.
+      try {
+        if (window.__TAURI__ && typeof window.__TAURI__.invoke === 'function') {
+          // non-blocking: open scanner app/window and continue to watch _ScannerTemp
+          window.__TAURI__.invoke('open_scanner_ui').catch(err => console.warn('open_scanner_ui failed', err));
+        }
+      } catch (err) {
+        console.warn('Tauri invoke unavailable or failed', err);
+      }
 
-    let latestFile = null;
-    let latestTime = 0;
+      const scanDir = await ensurePath(base, ["_ScannerTemp"]);
+      let latestFile = null;
+      let latestTime = 0;
+      let latestName = null;
+      let latestHandle = null;
 
-    for await (const [name, handle] of scanDir.entries()) {
-      if (handle.kind === "file" && /\.(jpg|jpeg|png|pdf)$/i.test(name)) {
-        const file = await handle.getFile();
-        if (file.lastModified > latestTime) {
-          latestTime = file.lastModified;
-          latestFile = file;
+      for await (const [name, handle] of scanDir.entries()) {
+        if (handle.kind === "file" && /\.(jpg|jpeg|png|pdf)$/i.test(name)) {
+          const file = await handle.getFile();
+          if (file.lastModified > latestTime) {
+            latestTime = file.lastModified;
+            latestFile = file;
+            latestName = name;
+            latestHandle = handle;
+          }
         }
       }
-    }
 
-    if (!latestFile) {
-      alert("No scanned file found. Please scan and then click again.");
-      return;
-    }
+      if (!latestFile) {
+        // Fallback: allow the user to pick a file manually if automatic scanner drop isn't available
+        const pickFile = async () => {
+          // Prefer native file picker if supported
+          if (window.showOpenFilePicker) {
+            try {
+              const [handle] = await window.showOpenFilePicker({
+                multiple: false,
+                types: [
+                  { description: 'Images or PDF', accept: { 'image/*': ['.png', '.jpg', '.jpeg'], 'application/pdf': ['.pdf'] } }
+                ]
+              });
+              const file = await handle.getFile();
+              return file;
+            } catch (err) {
+              return null;
+            }
+          }
 
-    // Attach it to form
-    setScanFile(latestFile);
-    console.log("Attached scanned file:", latestFile.name);
-  } catch (err) {
-    console.error("Scan fetch failed:", err);
-    alert("Failed to fetch scanned file.");
+          // Fallback to a hidden input element
+          return await new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.jpg,.jpeg,.png,.pdf,image/*';
+            input.style.display = 'none';
+            input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
+            document.body.appendChild(input);
+            input.click();
+            // clean up after selection
+            setTimeout(() => { document.body.removeChild(input); }, 1000);
+          });
+        };
+
+        const picked = await pickFile();
+        if (!picked) {
+          alert("No scanned file found. Please scan and then click again or pick a file.");
+          return;
+        }
+
+        setScanFile({ file: picked, name: picked.name, tempName: null, tempHandle: null, reused: false });
+        console.log("Attached picked file:", picked.name);
+        return;
+      }
+
+      // Save both the file and its original handle/name so we can delete it later from _ScannerTemp
+      setScanFile({ file: latestFile, name: latestFile.name, tempName: latestName, tempHandle: latestHandle, reused: false });
+      console.log("Attached scanned file:", latestFile.name);
+    } catch (err) {
+      console.error("Scan fetch failed:", err);
+      alert("Failed to fetch scanned file.");
+    }
   }
-}
 
+  // Create a preview URL for the attached scan (image or PDF). Clean up old URL on change.
+  useEffect(() => {
+    let url = null;
+    let cancelled = false;
+    async function makePreview() {
+      if (!scanFile) {
+        setScanPreviewUrl(null);
+        return;
+      }
+      try {
+        let file = scanFile.file;
+        if (!file && scanFile.fileHandle) {
+          file = await scanFile.fileHandle.getFile();
+        }
+        if (!file) {
+          setScanPreviewUrl(null);
+          return;
+        }
+        url = URL.createObjectURL(file);
+        if (!cancelled) setScanPreviewUrl(url);
+      } catch (err) {
+        console.warn('Failed to create scan preview', err);
+        setScanPreviewUrl(null);
+      }
+    }
+    makePreview();
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+      setScanPreviewUrl(null);
+    };
+  }, [scanFile]);
 
   return (
     <div>
-      <div className="header-row" style={{ marginBottom: 12 }}>
-        <div className="title">Check-In</div>
-      </div>
-      <div style={{ display: 'flex', gap: 20 }}>
-        {/* LEFT grid */}
-        <div style={{ flex: 1 }}>
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
-            <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
-              <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
-              <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
-              <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
+    {/* Header */}
+    <div className="header-row" style={{ marginBottom: 12 }}>
+      <div className="title">Check-In</div>
+    </div>
+
+    <div style={{ display: 'flex', gap: 20 }}>
+      {/* LEFT: Rooms grid */}
+      <div style={{ flex: 1 }}>
+        <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+            <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
+            <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
+            <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
+          </div>
+
+          {Object.keys(roomsByFloor).map(floorNum => (
+            <div key={floorNum} style={{ marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
+                Floor {floorNum}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                {roomsByFloor[floorNum].map(r => (
+                  <div
+                    key={r.number}
+                    style={roomBoxStyle(r)}
+                    title={
+                      r.status === 'reserved'
+                        ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+                        : r.status === 'occupied'
+                        ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                        : 'Free'
+                    }
+                    onClick={() => handleRoomClick(r)}
+                  >
+                    {r.number}
+                  </div>
+                ))}
+              </div>
             </div>
-            {Object.keys(roomsByFloor).map(floorNum => (
-              <div key={floorNum} style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-                  Floor {floorNum}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-                  {roomsByFloor[floorNum].map(r => (
-                    <div
-                      key={r.number}
-                      style={roomBoxStyle(r)}
-                      title={
-                        r.status === 'reserved'
-                          ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                          : r.status === 'occupied'
-                          ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkIn ? new Date(r.guest.checkIn).toLocaleDateString() : '-'}`
-                          : 'Free'
-                      }
-                      onClick={() => handleRoomClick(r)}
-                    >
-                      {r.number}
+          ))}
+        </div>
+      </div>
+
+      {/* RIGHT: Check-in form */}
+      <div style={{ flex: 1 }}>
+        <div className="card" style={{ padding: 16 }}>
+          <form onSubmit={submit}>
+            {/* Guest name */}
+            <div style={{ position: 'relative' }}>
+              <input
+                className="input"
+                style={{ marginBottom: 8 }}
+                placeholder="Guest name"
+                value={form.name}
+                onFocus={() => { nameFocusedRef.current = true; }}
+                onBlur={() => { nameFocusedRef.current = false; setTimeout(() => setGuestMatches([]), 100); }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setForm({ ...form, name: val });
+                  if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+                  searchTimeoutRef.current = setTimeout(() => {
+                    if (nameFocusedRef.current) searchGuestMatches(val);
+                  }, 250);
+                }}
+              />
+              {nameFocusedRef.current && guestMatches.length > 0 && (
+                <div
+                  className="card"
+                  style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0,
+                    background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    zIndex: 500, maxHeight: 220, overflowY: 'auto'
+                  }}
+                >
+                  {guestMatches.map((m, idx) => (
+                    <div key={idx} style={{ padding: '6px 8px', cursor: 'pointer' }}
+                      onMouseDown={(e) => { e.preventDefault(); useGuestMatch(m); }}>
+                      <strong>{m.name}</strong> {m.contact && ` – ${m.contact}`}
                     </div>
                   ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
+              )}
+            </div>
 
-        {/* RIGHT form */}
-        <div style={{ flex: 1 }}>
-          <div className="card" style={{ padding: 16 }}>
-            <form onSubmit={submit}>
-              {/* Guest name */}
-              <div style={{ position: 'relative' }}>
-                <input
-                  className="input"
-                  style={{ marginBottom: 8 }}
-                  placeholder="Guest name"
-                  value={form.name}
-                  onFocus={() => { nameFocusedRef.current = true; }}
-                  onBlur={() => { nameFocusedRef.current = false; setTimeout(() => setGuestMatches([]), 100); }}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setForm({ ...form, name: val });
-                    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-                    searchTimeoutRef.current = setTimeout(() => {
-                      if (nameFocusedRef.current) searchGuestMatches(val);
-                    }, 250);
-                  }}
-                />
-                {nameFocusedRef.current && guestMatches.length > 0 && (
-                  <div
-                    className="card"
-                    style={{
-                      position: 'absolute', top: '100%', left: 0, right: 0,
-                      background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                      zIndex: 500, maxHeight: 220, overflowY: 'auto'
-                    }}
-                  >
-                    {guestMatches.map((m, idx) => (
-                      <div key={idx} style={{ padding: '6px 8px', cursor: 'pointer' }}
-                        onMouseDown={(e) => { e.preventDefault(); useGuestMatch(m); }}>
-                        <strong>{m.name}</strong> {m.contact && ` – ${m.contact}`}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <input className="input" style={{ marginBottom: 8 }}
+              placeholder="Contact number"
+              value={form.contact}
+              onFocus={() => setGuestMatches([])}
+              onChange={(e) => setForm({ ...form, contact: e.target.value })}
+            />
 
-              <input className="input" style={{ marginBottom: 8 }}
-                placeholder="Contact number"
-                value={form.contact}
-                onFocus={() => setGuestMatches([])}
-                onChange={(e) => setForm({ ...form, contact: e.target.value })}
-              />
-              <input
+            <input
   className="input"
   style={{ marginBottom: 8 }}
   type="number"
   placeholder="Rate per day"
   value={form.rate}
+  required
+  min="1"
   onChange={(e) => setForm({ ...form, rate: e.target.value })}
 />
-              <input className="input"
-                placeholder="Room"
-                value={form.room}
-                readOnly
-              />
 
-              {/* Upload / reused indicator */}
-<div className="form-row" style={{ alignItems: "center", gap: 8 }}>
-  <button
-    type="button"
-    className="btn"
-    onClick={scanFromLocalScanner}
-    disabled={scanFile?.reused}
-    style={{
-      background: scanFile ? "var(--success, #18a957)" : undefined,
-      borderColor: scanFile ? "var(--success, #18a957)" : undefined,
-      color: scanFile ? "#fff" : undefined,
-      transition: "background 120ms ease, border-color 120ms ease, color 120ms ease"
-    }}
-  >
-    {scanFile?.reused ? "ID Attached (Reused)" : scanFile ? "ID Attached" : "Upload ID Scan"}
-  </button>
+            <input className="input"
+              placeholder="Room"
+              value={form.room}
+              readOnly
+            />
 
-  <input
-    type="file"
-    id="scanInput"
-    style={{ display: "none" }}
-    accept="image/*,.pdf"
-    onChange={(e) => setScanFile(e.target.files[0])}
-  />
+            {/* Scan / Reuse button */}
+            <div className="form-row" style={{ alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={scanFromLocalScanner}
+                disabled={scanFile?.reused}
+                style={{
+                  background: scanFile ? "var(--success, #18a957)" : undefined,
+                  borderColor: scanFile ? "var(--success, #18a957)" : undefined,
+                  color: scanFile ? "#fff" : undefined,
+                  transition: "background 120ms ease, border-color 120ms ease, color 120ms ease"
+                }}
+              >
+                {scanFile?.reused ? "ID Attached (Reused)" : scanFile ? "ID Attached" : "Upload ID Scan"}
+              </button>
 
-  {scanFile && (
-    <span
-      style={{
-        fontSize: 12,
-        padding: "4px 8px",
-        borderRadius: 6,
-        background: "rgba(24,169,87,0.12)",
-        color: "var(--success, #0d7a40)",
-        border: "1px solid rgba(24,169,87,0.25)"
-      }}
-    >
-      {scanFile.reused ? `Reused previous ID: ${scanFile.name}` : scanFile.name}
-    </span>
-  )}
-</div>
+              {scanFile && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    background: "rgba(24,169,87,0.12)",
+                    color: "var(--success, #0d7a40)",
+                    border: "1px solid rgba(24,169,87,0.25)"
+                  }}
+                >
+                  {scanFile.reused ? `Reused previous ID: ${scanFile.name}` : scanFile.name}
+                </span>
+              )}
+            </div>
 
-
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-  <button
-    className="btn primary"
-    type="submit"
-    disabled={!form.room || !form.name}
-  >
-    Check-In
-  </button>
-
-  {/* Clear / Reset button */}
-  <button
-    className="btn ghost"
-    type="button"
-    onClick={() => {
-      setForm({ name: "", contact: "", room: "" }); // clears inputs
-      setSelectedRoom(null);                        // removes highlight from room
-      setScanFile(null);                            // removes scan file info
-      setGuestMatches([]);                          // closes dropdown
-    }}
-  >
-    Clear
-  </button>
-</div>
-
-{successMsg && (
-  <div style={{ marginTop: 8, color: "green", fontWeight: "bold" }}>
-    {successMsg}
-  </div>
-)}
-
-
-              
-            </form>
-          </div>
-
-          {/* Current Guests */}
-          <div className="card" style={{ padding: 14, marginTop: 20 }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Current Guests</div>
-            {occupiedRooms.length === 0 && (<div>No rooms are occupied</div>)}
-            {occupiedRooms.map((r, idx) => (
-              <div key={idx} className="card" style={{ display: 'flex', justifyContent: 'space-between', padding: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>{r.guest?.name}</div>
-                  <div style={{ fontSize: 12 }}>Room {r.number} — Floor {String(r.number)[0]}</div>
-                </div>
-                <div style={{ fontSize: 12 }}>In: {new Date(r.guest?.checkIn).toLocaleDateString()}</div>
+            {/* Scan preview */}
+            {scanPreviewUrl && (
+              <div style={{ marginTop: 8 }}>
+                {/\.pdf$/i.test(scanFile?.name || '') ? (
+                  <object data={scanPreviewUrl} type="application/pdf" width="100%" height="300">
+                    <a href={scanPreviewUrl} target="_blank" rel="noreferrer">Open PDF</a>
+                  </object>
+                ) : (
+                  <img src={scanPreviewUrl} alt="Scan preview" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 8, border: '1px solid rgba(0,0,0,0.06)' }} />
+                )}
               </div>
-            ))}
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn primary" type="submit" disabled={!form.room || !form.name || !form.contact}>Check-In</button>
+              <button className="btn ghost" type="button" onClick={() => {
+                setForm({ name: "", contact: "", room: "", rate: "" });
+                setSelectedRoom(null);
+                setScanFile(null);
+                setGuestMatches([]);
+              }}>Clear</button>
+            </div>
+
+            {successMsg && (
+              <div style={{ marginTop: 8, color: "green", fontWeight: "bold" }}>
+                {successMsg}
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Current Guests */}
+        <div className="card" style={{ padding: 14, marginTop: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontWeight: 800 }}>Current Guests</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedRooms.length} occupied</div>
           </div>
+
+          {/* Search (full width) */}
+          <div style={{ marginBottom: 10 }}>
+            <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
+          </div>
+
+          {occupiedRooms.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
+            {/** make a filtered view so search only affects the display */}
+            { (occupiedRooms.filter(g => {
+                const q = guestSearch.trim().toLowerCase();
+                if (!q) return true;
+                const name = String(g.guest?.name || '').toLowerCase();
+                const rooms = (g.rooms || []).map(String).join(', ');
+                return name.includes(q) || rooms.includes(q);
+              })).map((g, idx) => {
+              const name = g.guest?.name || 'Guest';
+              const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
+              return (
+                <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
+                    {initials}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                          {g.guest?.contact && (
+                            <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.guest.contact}</div>
+                          )}
+                          {g.guest?.edited && (
+                            <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>₹{g.guest?.rate || 0}/day</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Paid: ₹{paymentsMap[groupKey(g)] || 0}</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{(g.rooms || []).join(', ')}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>Floor {String(g.rooms[0])[0]}</div>
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)' }}>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || "").toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
+                    <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: '#2f4338', color: '#f1eedf'}} onClick={() => openEditModal(g)}>Edit</button>
+                    {scannedMap[groupKey(g)] ? (
+                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
+                    ) : (
+                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.18)' }} onClick={() => attachScanToGuest(g)}>⬆️ Upload ID</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            </div>
+          </div>
+
+          {/* Edit Modal */}
+          {showEditModal && editGuest && (
+            <Modal onClose={() => setShowEditModal(false)}>
+              <h3 style={{ marginTop: 0 }}>Edit Booking</h3>
+              <div style={{ marginBottom: 8 }}>
+                <input className="input" value={editRoomsInput} onChange={(e) => setEditRoomsInput(e.target.value)} placeholder="Rooms (comma separated)" />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <input className="input" type="number" value={editRateInput} onChange={(e) => setEditRateInput(e.target.value)} placeholder="Group rate per day" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn ghost" onClick={() => { setShowEditModal(false); setEditGuest(null); }}>Cancel</button>
+                <button className="btn primary" onClick={saveEditChanges}>Save</button>
+              </div>
+            </Modal>
+          )}
+
+          {/* Preview Modal */}
+          {showPreviewModal && previewUrl && (
+            <Modal onClose={() => { setShowPreviewModal(false); if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); } }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 style={{ margin: 0 }}>{previewFileName || 'Scanned Document'}</h4>
+                <a href={previewUrl} target="_blank" rel="noreferrer" className="btn">Open in new tab</a>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {/\.pdf$/i.test(previewFileName || '') ? (
+                  <object data={previewUrl} type="application/pdf" width="100%" height={500}>
+                    <a href={previewUrl} target="_blank" rel="noreferrer">Open PDF</a>
+                  </object>
+                ) : (
+                  <img src={previewUrl} alt="Preview" style={{ maxWidth: '100%', maxHeight: 600 }} />
+                )}
+              </div>
+            </Modal>
+          )}
+
+          {/* Temp Preview Modal: shown when a file exists in _ScannerTemp and user clicked Upload ID */}
+          {showTempModal && tempPending && tempPreviewUrl && (
+            <Modal onClose={cancelTempPreview}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 style={{ margin: 0 }}>Preview scanned document</h4>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {/\.pdf$/i.test(tempPending.name || '') ? (
+                  <object data={tempPreviewUrl} type="application/pdf" width="100%" height={350}>
+                    <a href={tempPreviewUrl} target="_blank" rel="noreferrer">Open PDF</a>
+                  </object>
+                ) : (
+                  <img src={tempPreviewUrl} alt="Temp preview" style={{ maxWidth: '100%', maxHeight: 350 }} />
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="btn ghost" onClick={cancelTempPreview}>Cancel</button>
+                <button className="btn primary" onClick={saveTempScanConfirmed}>OK</button>
+              </div>
+            </Modal>
+          )}
+          {conflictMsg && (
+            <Modal onClose={() => setConflictMsg(null)}>
+              <h3 style={{ marginTop: 0 }}>Room conflict</h3>
+              <div style={{ marginBottom: 12 }}>{conflictMsg}</div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button className="btn ghost" onClick={() => setConflictMsg(null)}>OK</button>
+              </div>
+            </Modal>
+          )}
         </div>
       </div>
     </div>
+  </div>
   );
 }
 
 function CheckOut({ state, setState }) {
+  const navigate = useNavigate();
   const ymd = (d = new Date()) => d.toISOString().slice(0, 10);
 
   const [confirmMsg, setConfirmMsg] = useState(null);
@@ -1001,35 +1741,26 @@ function CheckOut({ state, setState }) {
 
   // ---------- FILE HELPERS ----------
   async function findCheckinFile(base, checkInDate, room, name) {
-    const safe = (s) => String(s).toLowerCase().trim();
-    const norm = (s) => safe(s).replace(/[\s_]+/g, "_");
-
+    // Simplified: scan the checkins folder for the date and find a file whose JSON contains the guest name
+    // and whose room (number or array) includes the requested room.
+    const norm = (s) => String(s).toLowerCase().trim();
     const normalizedName = norm(name);
-    const expectedFile = `checkin-${normalizedName}-${room}-${checkInDate}.json`;
-
-    try {
-      const dir = await ensurePath(base, ["Checkins", checkInDate]);
-      const handle = await dir.getFileHandle(expectedFile);
-      return { dir, fileName: expectedFile };
-    } catch {}
 
     async function scanFolder(dateFolder) {
       const dir = await ensurePath(base, ["Checkins", dateFolder]);
       for await (const [entryName, handle] of dir.entries()) {
         if (handle.kind !== "file" || !entryName.endsWith(".json")) continue;
-
-        const entryLower = entryName.toLowerCase();
-        const isRoomOk = entryLower.includes(`-${String(room)}-${dateFolder}.json`);
-        const isCheckinPrefix = entryLower.startsWith("checkin-");
-        if (!(isRoomOk && isCheckinPrefix)) continue;
-
-        const start = "checkin-".length;
-        const end = entryLower.lastIndexOf(`-${String(room)}-${dateFolder}.json`);
-        if (end <= start) continue;
-
-        const nameSegment = entryLower.slice(start, end);
-        if (norm(nameSegment) === normalizedName) {
-          return { dir, fileName: entryName };
+        try {
+          const file = await handle.getFile();
+          const data = JSON.parse(await file.text());
+          const fileNameMatches = String(entryName).toLowerCase();
+          const dataName = norm(data.name || "");
+          const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+          if (dataName === normalizedName && rooms.includes(Number(room))) {
+            return { dir, fileName: entryName };
+          }
+        } catch (err) {
+          continue;
         }
       }
       throw new Error("not-found");
@@ -1053,20 +1784,27 @@ function CheckOut({ state, setState }) {
   }
 
   async function getRateFromCheckin(checkInDate, room, name) {
-    const base = await getBaseFolder();
-    const { dir, fileName } = await findCheckinFile(base, checkInDate, room, name);
-    const fileHandle = await dir.getFileHandle(fileName);
-    const file = await fileHandle.getFile();
-    const data = JSON.parse(await file.text());
-    return Number(data.rate) || 0;
+    try {
+      const base = await getBaseFolder();
+      const { dir, fileName } = await findCheckinFile(base, checkInDate, room, name);
+      const fileHandle = await dir.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      const data = JSON.parse(await file.text());
+      return Number(data.rate) || 0;
+    } catch (err) {
+      return 0;
+    }
   }
 
   async function getTotalPayments(checkInDate, room, name, checkOutDate) {
+    // room may be a single number/string or an array of room numbers
+    const roomsSet = new Set(
+      (Array.isArray(room) ? room : [room]).map(r => Number(r))
+    );
     let totalPayment = 0;
     try {
       const base = await getBaseFolder();
       const rentRoot = await ensurePath(base, ["RentCollections"]);
-
       for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
         if (dateHandle.kind !== "directory") continue;
         if (dateFolder < checkInDate || dateFolder > checkOutDate) continue;
@@ -1076,8 +1814,13 @@ function CheckOut({ state, setState }) {
           const rentFile = await rentFileHandle.getFile();
           const rentData = JSON.parse(await rentFile.text());
 
+          const paidRoom = rentData.room;
+          const paidRooms = Array.isArray(paidRoom) ? paidRoom.map(Number) : [Number(paidRoom)];
+
+          // include this rent entry if it matches the guest name and intersects the requested rooms
+          const intersects = paidRooms.some(pr => roomsSet.has(Number(pr)));
           if (
-            String(rentData.room) === String(room) &&
+            intersects &&
             rentData.name?.trim().toLowerCase() === name.trim().toLowerCase()
           ) {
             totalPayment += Number(rentData.amount) || 0;
@@ -1104,19 +1847,25 @@ function CheckOut({ state, setState }) {
     data.checkOutTime = now.toLocaleTimeString();
     data.checkOutDateTime = now.toISOString();
 
-    const totalPayment = await getTotalPayments(checkInDate, room, name, ymd(now));
+    const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+  // Sum payments for the whole group (avoid double-counting payments saved against multiple rooms)
+  const totalPayment = await getTotalPayments(checkInDate, rooms, name, ymd(now));
+
     const days = Math.max(1, Math.ceil((now - new Date(data.checkIn)) / (1000 * 60 * 60 * 24)));
-const totalRent = days * (Number(data.rate) || 0);
+  // The stored `data.rate` is the group total per day (user-entered rate applies to the whole booking)
+  const groupRatePerDay = Number(data.rate) || 0;
+  const totalRent = days * groupRatePerDay;
 
-data.daysStayed = days;
-data.totalRent = totalRent;
-data.totalPaid = totalPayment;
-data.paymentTallyStatus = totalPayment >= totalRent ? "tallied" : "not-tallied";
-
+    data.rooms = rooms; // keep canonical array property
+    data.daysStayed = days;
+    data.totalRent = totalRent;
+    data.totalPaid = totalPayment;
+    data.paymentTallyStatus = totalPayment >= totalRent ? "tallied" : "not-tallied";
 
     const checkoutDir = await ensurePath(base, ["Checkouts", ymd(now)]);
     const safeName = String(name).replace(/[^\w\-]+/g, "_");
-    const checkoutFileName = `checkout-${safeName}-${room}-${checkInDate}.json`;
+    const roomsKey = rooms.join('_');
+    const checkoutFileName = `checkout-${safeName}-${roomsKey}-${checkInDate}.json`;
     await writeJSON(checkoutDir, checkoutFileName, data);
 
     await checkinDir.removeEntry(fileName);
@@ -1126,26 +1875,35 @@ data.paymentTallyStatus = totalPayment >= totalRent ? "tallied" : "not-tallied";
     try {
       const newState = { ...state, floors: { ...state.floors } };
 
+      // roomNumber may be a single number or an array of numbers (group checkout)
+      const roomsToCheckout = Array.isArray(roomNumber) ? roomNumber.map(Number) : [Number(roomNumber)];
+
+      // Find guest info from first room to identify the checkin file
+      let guestName = null;
+      let guestCheckIn = null;
       for (const fnum of Object.keys(newState.floors)) {
-        const updated = [];
         for (const r of newState.floors[fnum]) {
-          if (r.number !== roomNumber) {
-            updated.push(r);
-            continue;
+          if (roomsToCheckout.includes(r.number) && r.guest) {
+            guestName = r.guest.name;
+            guestCheckIn = r.guest.checkIn ? new Date(r.guest.checkIn) : new Date();
+            break;
           }
-
-          const guest = r.guest;
-          const checkIn = guest?.checkIn ? new Date(guest.checkIn) : new Date();
-
-          await moveCheckinToCheckout(
-            checkIn.toISOString().slice(0, 10),
-            roomNumber,
-            guest?.name || "Guest"
-          );
-
-          updated.push({ ...r, status: "free", guest: null });
         }
-        newState.floors[fnum] = updated;
+        if (guestName) break;
+      }
+
+      if (guestName) {
+        await moveCheckinToCheckout(
+          (guestCheckIn || new Date()).toISOString().slice(0, 10),
+          roomsToCheckout[0],
+          guestName || "Guest"
+        );
+      }
+
+      for (const fnum of Object.keys(newState.floors)) {
+        newState.floors[fnum] = newState.floors[fnum].map(r =>
+          roomsToCheckout.includes(r.number) ? { ...r, status: 'free', guest: null } : r
+        );
       }
 
       setState(newState);
@@ -1192,10 +1950,17 @@ data.paymentTallyStatus = totalPayment >= totalRent ? "tallied" : "not-tallied";
     setTimeout(() => setErrorMsg(""), 2500);
   }
 
-  const occupied = [];
+  // Group occupied rooms by guest (so multi-room bookings are a single item)
+  const occupiedMap = new Map();
   for (const f of Object.values(state.floors)) {
-    for (const r of f) if (r.status === "occupied") occupied.push(r);
+    for (const r of f) {
+      if (r.status !== 'occupied' || !r.guest) continue;
+      const key = `${r.guest.name}::${r.guest.checkIn || ''}`;
+      if (!occupiedMap.has(key)) occupiedMap.set(key, { guest: r.guest, rooms: [] });
+      occupiedMap.get(key).rooms.push(r.number);
+    }
   }
+  const occupied = Array.from(occupiedMap.values()).map(x => ({ guest: x.guest, rooms: x.rooms.sort((a,b)=>a-b) }));
 
   useEffect(() => {
     loadCheckoutList();
@@ -1205,156 +1970,426 @@ data.paymentTallyStatus = totalPayment >= totalRent ? "tallied" : "not-tallied";
     const q = searchQuery.toLowerCase();
     return (
       c.name?.toLowerCase().includes(q) ||
-      String(c.room || "").includes(q)
+      String(Array.isArray(c.room) ? c.room.join(', ') : (c.room || "")).includes(q)
     );
   });
 
   return (
-    <div style={{ display: "flex", gap: "16px" }}>
-      {/* LEFT SIDE - OCCUPIED ROOMS */}
-      <div style={{ flex: 1 }}>
-        {successMsg && <ToastCard color="#16a34a">{successMsg}</ToastCard>}
-        {errorMsg && <ToastCard color="#dc2626">{errorMsg}</ToastCard>}
+    <div style={{ display: "flex", gap: 16 }}> {/* LEFT SIDE - OCCUPIED ROOMS */} <div style={{ flex: 1, minWidth: 0 }}> {successMsg && <ToastCard color="#16a34a">{successMsg}</ToastCard>} {errorMsg && <ToastCard color="#dc2626">{errorMsg}</ToastCard>}
+    {confirmMsg && (
+  <ModalCard>
+    <h3 style={{ marginTop: 0 }}>Confirm Check-Out</h3>
+    <div style={{ marginBottom: 12, whiteSpace: "pre-line" }}>
+      {confirmMsg.text}
+    </div>
+    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <button className="btn ghost" onClick={() => setConfirmMsg(null)}>
+        Cancel
+      </button>
+      <button
+        className="btn primary"
+        onClick={() => {
+          setConfirmMsg(null);
+          doCheckout(confirmMsg.roomNumber);
+        }}
+      >
+        Confirm
+      </button>
+    </div>
+  </ModalCard>
+)}
 
-        {confirmMsg && (
-          <ModalCard>
-            <h3>Confirm Check-Out</h3>
-            <div style={{ marginBottom: 12, whiteSpace: "pre-line" }}>
-              {confirmMsg.text}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn ghost" onClick={() => setConfirmMsg(null)}>
-                Cancel
-              </button>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  setConfirmMsg(null);
-                  doCheckout(confirmMsg.roomNumber);
-                }}
-              >
-                Confirm
-              </button>
-            </div>
-          </ModalCard>
-        )}
+<div className="card" style={{ padding: 12, marginBottom: 12 }}>
+  <h2 style={{ margin: 0, marginBottom: 8, }}>Check-Out</h2>
 
-        <h2>Check-Out</h2>
-        {occupied.length === 0 && (
-          <div style={{ color: "var(--muted)" }}>No occupied rooms</div>
-        )}
-        {occupied.map((r) => {
-          const checkIn = r.guest?.checkIn
-            ? new Date(r.guest.checkIn)
-            : new Date();
-          const now = new Date();
-          const days = Math.max(
-            1,
-            Math.ceil((now - checkIn) / (1000 * 60 * 60 * 24))
-          );
+  {occupied.length === 0 ? (
+    <div style={{ color: "var(--muted)" }}>No occupied rooms</div>
+  ) : (
+    <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {occupied.map((entry) => {
+        const checkIn = entry.guest?.checkIn ? new Date(entry.guest.checkIn) : new Date();
+        const now = new Date();
+        const days = Math.max(1, Math.ceil((now - checkIn) / (1000 * 60 * 60 * 24)));
 
-          return (
-            <div
-              key={r.number}
-              className="card"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 700 }}>{r.guest?.name}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                  Room {r.number}
-                </div>
+        const roomsLabel = entry.rooms.join(', ');
+
+        return (
+          <div
+            key={roomsLabel}
+            className="card"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: 10
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {entry.guest?.name}
               </div>
-              <button
-                className="btn primary"
-                onClick={async () => {
-                  try {
-                    const rate = await getRateFromCheckin(
-                      checkIn.toISOString().slice(0, 10),
-                      r.number,
-                      r.guest?.name || "Guest"
-                    );
-                    const totalRent = days * rate;
-                    const totalPayment = await getTotalPayments(
-                      checkIn.toISOString().slice(0, 10),
-                      r.number,
-                      r.guest?.name || "Guest",
-                      ymd(now)
-                    );
-                    const tallyStatus = totalPayment >= totalRent;
-                    setConfirmMsg({
-                      roomNumber: r.number,
-                      text: `Check out room ${r.number}?
-Guest: ${r.guest?.name || ""}
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                Rooms {roomsLabel}
+              </div>
+            </div>
+
+            <button
+              className="btn primary"
+              onClick={async () => {
+                try {
+                  const checkInISO = checkIn.toISOString().slice(0, 10);
+                  const nowISO = ymd(now);
+                  const guestName = entry.guest?.name || "Guest";
+
+                  // rate per room
+                  const rate = await getRateFromCheckin(checkInISO, entry.rooms[0], guestName);
+                // NOTE: rate entered at check-in is treated as the total group rate (not per-room)
+                const totalRent = days * (Number(rate) || 0);
+                  // Fetch total payments for the whole group (don't sum per-room)
+                  const totalPayment = await getTotalPayments(checkInISO, entry.rooms, guestName, nowISO);
+                  const tallyStatus = totalPayment >= totalRent;
+
+                  setConfirmMsg({
+                    roomNumber: entry.rooms, // keep array
+                    text: `Check out rooms ${roomsLabel}?
+                    Guest: ${guestName}
 Days Stayed: ${days}
 Total Rent: ₹${totalRent}
 Total Payment: ₹${totalPayment}
-Tally: ${tallyStatus ? "✅" : "❌"}`,
-                    });
-                  } catch (err) {
-                    showError("Failed to load payment data");
-                  }
-                }}
-              >
-                Check-Out
-              </button>
-            </div>
-          );
-        })}
+Tally: ${tallyStatus ? "✅" : "❌"}`
+                  });
+                } catch (err) {
+                  showError("Failed to load payment data");
+                }
+              }}
+            >
+              Check-Out
+            </button>
+          </div>
+        );
+      })}
+</div>
+)}
+</div>
+
+</div>
+{/* RIGHT SIDE - CHECKED OUT LIST */}
+
+<div style={{ flex: 1, minWidth: 0 }}> <div className="card" style={{ padding: 12, marginBottom: 12 }}> <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}> <h2 style={{ margin: 0, flex: 1,  }}>Checked-Out Guests</h2> <button onClick={() => navigate("/checkout-list")} className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}> Show All Checkout </button> </div>
+  <input
+    type="text"
+    placeholder="Search by name or room..."
+    value={searchQuery}
+    onChange={(e) => setSearchQuery(e.target.value)}
+    style={{
+      marginBottom: 8,
+      padding: "6px 8px",
+      width: "100%",
+      border: "1px solid var(--muted)",
+      borderRadius: 6
+    }}
+  />
+
+  <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    {filteredCheckoutList.length === 0 ? (
+      <div style={{ color: "var(--muted)" }}>No checkouts found</div>
+    ) : (
+      filteredCheckoutList.map((c, i) => (
+        <div key={i} className="card" style={{ padding: 10 }}>
+          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {c.name}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            Room {c.room}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
+            <div>Check-In: {c.checkInDate} {c.checkInTime}</div>
+            <div>Check-Out: {c.checkOutDate} {c.checkOutTime}</div>
+            <div>Days Stayed: {c.daysStayed}</div>
+            <div>Rent: ₹{c.totalRent}</div>
+            <div>Total Paid: ₹{c.totalPaid}</div>
+            <div>Payment Status: {c.paymentTallyStatus === "tallied" ? "✅ Tallied" : "❌ Not Tallied"}</div>
+          </div>
+        </div>
+      ))
+    )}
+  </div>
+</div>
+</div> </div>
+  );
+}
+
+function CheckoutListPage() {
+  const [checkoutList, setCheckoutList] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterPayment, setFilterPayment] = useState("all"); // "all" | "tallied" | "not-tallied"
+
+  useEffect(() => {
+    loadCheckoutList();
+  }, []);
+
+  async function loadCheckoutList() {
+    try {
+      const base = await getBaseFolder();
+      const checkoutRoot = await ensurePath(base, ["Checkouts"]);
+      const all = [];
+      for await (const [dateFolder, dateHandle] of checkoutRoot.entries()) {
+        if (dateHandle.kind !== "directory") continue;
+        for await (const [fileName, fileHandle] of dateHandle.entries()) {
+          if (!fileName.endsWith(".json")) continue;
+          const file = await fileHandle.getFile();
+          const data = JSON.parse(await file.text());
+          all.push(data);
+        }
+      }
+      all.sort((a, b) => new Date(b.checkOutDateTime) - new Date(a.checkOutDateTime));
+      setCheckoutList(all);
+    } catch (err) {
+      console.error("Failed to load checkout list", err);
+      setErrorMsg("Failed to load checkout list");
+      setTimeout(() => setErrorMsg(""), 3000);
+    }
+  }
+
+  // Helpers
+  const formatMoney = (n) => `₹${Number(n || 0).toLocaleString()}`;
+  const chipStyle = (ok) => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    padding: "4px 8px",
+    borderRadius: 999,
+    border: `1px solid ${ok ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.25)"}`,
+    background: ok ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.08)",
+    color: ok ? "#166534" : "#991b1b",
+    fontWeight: 600
+  });
+
+  // Filters
+  const filteredCheckoutList = checkoutList.filter((c) => {
+    const q = searchQuery.trim().toLowerCase();
+
+    // Search
+    const matchesSearch =
+      q.length === 0 ||
+      (c.name || "").toLowerCase().includes(q) ||
+      String(c.room || "").includes(q);
+
+    // Payment
+    const status = (c.paymentTallyStatus || "").toLowerCase();
+    const matchesPayment =
+      filterPayment === "all" ||
+      (filterPayment === "tallied" && status === "tallied") ||
+      (filterPayment === "not-tallied" && status !== "tallied");
+
+    // Date range (inclusive)
+    const coTime = c.checkOutDateTime
+      ? new Date(c.checkOutDateTime)
+      : new Date((c.checkOutDate || "") + "T00:00:00");
+
+    const fromOk = filterDateFrom ? coTime >= new Date(filterDateFrom + "T00:00:00") : true;
+    const toOk = filterDateTo ? coTime <= new Date(filterDateTo + "T23:59:59") : true;
+
+    return matchesSearch && matchesPayment && fromOk && toOk;
+  });
+
+  return (
+    <div style={{ padding: 16 }}>
+      {errorMsg && <ToastCard color="#dc2626">{errorMsg}</ToastCard>}
+
+      {/* Filters/Header */}
+      <div
+        className="card"
+        style={{
+          padding: 14,
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          background: "var(--card-bg, #fff)",
+          borderRadius: 10,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.05)"
+        }}
+      >
+        <div style={{ fontWeight: 800, color: "var(--deep, #0b3d2e)", fontSize: 18 }}>
+          Checked-Out Guests
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="text"
+            placeholder="Search name or room..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8,
+              minWidth: 200
+            }}
+          />
+          <input
+            type="date"
+            value={filterDateFrom}
+            onChange={(e) => setFilterDateFrom(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8
+            }}
+          />
+          <input
+            type="date"
+            value={filterDateTo}
+            onChange={(e) => setFilterDateTo(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8
+            }}
+          />
+          <select
+            value={filterPayment}
+            onChange={(e) => setFilterPayment(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8,
+              minWidth: 160
+            }}
+          >
+            <option value="all">All payments</option>
+            <option value="tallied">Tallied ✅</option>
+            <option value="not-tallied">Not tallied ❌</option>
+          </select>
+          <button
+            className="btn ghost"
+            onClick={() => {
+              setSearchQuery("");
+              setFilterDateFrom("");
+              setFilterDateTo("");
+              setFilterPayment("all");
+            }}
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
-      {/* RIGHT SIDE - CHECKED OUT LIST */}
-      <div style={{ flex: 1 }}>
-        <h2>Checked-Out Guests</h2>
-        <input
-          type="text"
-          placeholder="Search by name or room..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            marginBottom: "8px",
-            padding: "6px",
-            width: "100%",
-            border: "1px solid var(--muted)",
-            borderRadius: "4px",
-          }}
-        />
-        <div className="list">
-          {filteredCheckoutList.length === 0 && (
-            <div style={{ color: "var(--muted)" }}>No checkouts found</div>
-          )}
-          {filteredCheckoutList.map((c, i) => (
-  <div key={i} className="card" style={{ padding: "8px" }}>
-    <div style={{ fontWeight: 700 }}>{c.name}</div>
-    <div style={{ fontSize: 12, color: "var(--muted)" }}>
-      Room {c.room}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Check-In: {c.checkInDate} {c.checkInTime}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Check-Out: {c.checkOutDate} {c.checkOutTime}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Days Stayed: {c.daysStayed}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Rent: ₹{c.totalRent}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Total Paid: ₹{c.totalPaid}
-    </div>
-    <div style={{ fontSize: 12 }}>
-      Payment Status:{" "}
-      {c.paymentTallyStatus === "tallied" ? "✅ Tallied" : "❌ Not Tallied"}
-    </div>
-  </div>
-))}
-
+      {/* Table */}
+      <div
+        className="card"
+        style={{
+          padding: 0,
+          overflow: "hidden",
+          background: "var(--card-bg, #fff)",
+          borderRadius: 10,
+          boxShadow: "0 4px 10px rgba(0,0,0,0.06)"
+        }}
+      >
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr
+                style={{
+                  background: "linear-gradient(0deg, rgba(12,53,44,0.03), rgba(12,53,44,0.03))",
+                  color: "var(--deep, #0b3d2e)"
+                }}
+              >
+                {[
+                  "Name",
+                  "Room",
+                  "Check-In",
+                  "Check-Out",
+                  "Days",
+                  "Rent",
+                  "Total Paid",
+                  "Payment Status"
+                ].map((h, idx) => (
+                  <th
+                    key={idx}
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      textAlign: "left",
+                      padding: "10px 12px",
+                      fontSize: 12,
+                      letterSpacing: 0.2,
+                      borderBottom: "1px solid rgba(0,0,0,0.06)",
+                      zIndex: 1,
+                      background: "inherit"
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCheckoutList.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    style={{
+                      textAlign: "center",
+                      padding: 16,
+                      color: "var(--muted, #6b7280)"
+                    }}
+                  >
+                    No checkouts found
+                  </td>
+                </tr>
+              ) : (
+                filteredCheckoutList.map((c, i) => {
+                  const ok = (c.paymentTallyStatus || "").toLowerCase() === "tallied";
+                  const rowBg = i % 2 === 0 ? "rgba(0,0,0,0.015)" : "transparent";
+                  return (
+                    <tr
+                      key={i}
+                      style={{
+                        background: rowBg,
+                        borderBottom: "1px solid rgba(0,0,0,0.06)"
+                      }}
+                    >
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          fontWeight: 600,
+                          maxWidth: 220,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        {c.name}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>{c.room}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {(c.checkInDate || "-")} {(c.checkInTime || "")}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {(c.checkOutDate || "-")} {(c.checkOutTime || "")}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>{c.daysStayed}</td>
+                      <td style={{ padding: "10px 12px" }}>{formatMoney(c.totalRent)}</td>
+                      <td style={{ padding: "10px 12px" }}>{formatMoney(c.totalPaid)}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span style={chipStyle(ok)}>
+                          <span>{ok ? "✅" : "❌"}</span>
+                          <span>{ok ? "Tallied" : "Not Tallied"}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -2123,63 +3158,74 @@ const [expMsg, setExpMsg] = useState("");
   const [listItems, setListItems] = useState([]);
 
   // 🔹 Compute occupied rooms
+  // 🔹 Compute occupied rooms grouped by guest (multi-room bookings shown as one option)
   const occupiedRooms = [];
-  Object.keys(state.floors).forEach(floorNum => {
-    state.floors[floorNum].forEach(room => {
-      if (room.status === "occupied" && room.guest) {
-        occupiedRooms.push({ number: room.number, guestName: room.guest.name });
-      }
+  {
+    const map = new Map();
+    Object.keys(state.floors).forEach(floorNum => {
+      state.floors[floorNum].forEach(room => {
+        if (room.status === "occupied" && room.guest) {
+          const key = `${room.guest.name}::${room.guest.checkIn || ''}`;
+          if (!map.has(key)) map.set(key, { guestName: room.guest.name, rooms: [] });
+          map.get(key).rooms.push(room.number);
+        }
+      });
     });
-  });
+    for (const v of map.values()) {
+      occupiedRooms.push({ guestName: v.guestName, rooms: v.rooms.sort((a,b)=>a-b) });
+    }
+  }
 
-  const handleRoomChange = (roomNo) => {
-    const selected = occupiedRooms.find(r => String(r.number) === roomNo);
+  const handleRoomChange = (roomsCsv) => {
+    const rooms = String(roomsCsv || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const selected = occupiedRooms.find(r => r.rooms.join(',') === rooms.join(','));
     setRentForm(f => ({
       ...f,
-      room: roomNo,
-      name: selected ? selected.guestName : ""
+      room: rooms.join(',') || '',
+      name: selected ? selected.guestName : ''
     }));
   };
-
-  
-
   const submitRent = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!rentForm.room || !rentForm.name || !rentForm.days || !rentForm.amount || !rentForm.mode) {
-    alert("Please fill all Rent Collection fields.");
-    return;
-  }
+    if (!rentForm.room || !rentForm.name || !rentForm.days || !rentForm.amount || !rentForm.mode) {
+      alert("Please fill all Rent Collection fields.");
+      return;
+    }
 
-  try {
-    const base = await getBaseFolder();
-    if (!base) return alert("Storage not connected");
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert("Storage not connected");
 
-    setRentForm({ name: "", room: "", days: "", amount: "", mode: "Cash" });
-    setRentMsg("✅ Rent entry saved successfully.");
-    
-    setTimeout(() => setRentMsg(""), 3000);
+      setRentForm({ name: "", room: "", days: "", amount: "", mode: "Cash" });
+      setRentMsg("✅ Rent entry saved successfully.");
+      setTimeout(() => setRentMsg(""), 3000);
 
-    const today = ymd(new Date());
-    const rentDir = await ensurePath(base, ["RentCollections", today]);
+      const today = ymd(new Date());
+      const rentDir = await ensurePath(base, ["RentCollections", today]);
 
-    const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${rentForm.room}-${Date.now()}.json`;
+      // Normalize rooms as array
+      const roomsArr = rentForm.room ? rentForm.room.split(',').map(s => Number(s.trim())) : [];
+      const roomsKey = roomsArr.join('_') || String(rentForm.room || '').replace(/[^\w\-]+/g, '_');
+      const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${roomsKey || 'room'}-${Date.now()}.json`;
 
-    const rentData = {
-      ...rentForm,
-      date: new Date().toISOString(),
-    };
+      const rentData = {
+        ...rentForm,
+        room: roomsArr.length ? roomsArr : (isNaN(Number(rentForm.room)) ? rentForm.room : [Number(rentForm.room)]),
+        date: new Date().toISOString(),
+      };
 
-    await writeJSON(rentDir, fileName, rentData);
-    // 🔹 Refresh today's lists instantly
-    await loadTodayData();
-
-    
-  } catch (err) {
-    console.warn("Failed to save rent", err);
-    alert("Failed to save rent.");
-  }
-};
+      await writeJSON(rentDir, fileName, rentData);
+      // ✅ Refresh today's lists instantly
+      await loadTodayData();
+    } catch (err) {
+      console.warn("Failed to save rent", err);
+      alert("Failed to save rent.");
+    }
+  };
 
 
   const submitExpense = async (e) => {
@@ -2294,14 +3340,14 @@ async function loadTodayData() {
   <div style={{ display: "flex", gap: 10 }}>
     <button
       onClick={() => navigate("/rent-payments")}
-      className="pill"
+      className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
     >
       📑 Show All Rent Payments
     </button>
 
     <button
       onClick={() => navigate("/expense-payments")}
-      className="pill"
+      className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
     >
       💰 Show All Expenses
     </button>
@@ -2325,8 +3371,8 @@ async function loadTodayData() {
       <select className="input" value={rentForm.room} onChange={(e) => handleRoomChange(e.target.value)}>
         <option value="">Select Occupied Room</option>
         {occupiedRooms.map(r => (
-          <option key={r.number} value={r.number}>
-            Room {r.number} — {r.guestName}
+          <option key={r.rooms.join('_')} value={r.rooms.join(',')}>
+            Rooms {r.rooms.join(', ')} — {r.guestName}
           </option>
         ))}
       </select>
@@ -2396,7 +3442,7 @@ async function loadTodayData() {
             }}
           >
             <div>
-              Room {r.room} — <strong>{r.name}</strong>
+              Rooms {Array.isArray(r.room) ? r.room.join(', ') : r.room} — <strong>{r.name}</strong>
             </div>
             <div style={{ fontWeight: 600 }}>{r.days} Day - ₹{r.amount}</div>
           </li>
@@ -2826,7 +3872,8 @@ export default function App() {
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
-            <Route path="/expense-payments" element={<ExpensePayments />} /> 
+            <Route path="/expense-payments" element={<ExpensePayments />} />
+            <Route path="/checkout-list" element={<CheckoutListPage />} /> 
           </Routes>
         </div>
       </div>
