@@ -1125,24 +1125,29 @@ function CheckIn({ state, setState, locationState }) {
           name: match.scanInfo.fileName
         });
       } else if (match.source === "checkout" && match.scanInfo.checkInDate) {
-        const oldDate = match.scanInfo.checkInDate;
-        const oldYear = oldDate.slice(6, 10); // dd/mm/yyyy → year
-        const oldMonth = oldDate.slice(3, 5); // dd/mm/yyyy → month
-        const oldDateFolder = `${oldDate.slice(0, 2)}-${oldMonth}-${oldYear}`;
-        const oldScanDir = await ensurePath(base, ["ScannedDocuments", oldYear, oldMonth, oldDateFolder]);
-        for await (const [entryName, entryHandle] of oldScanDir.entries()) {
-          if (entryHandle.kind === "file" && entryName.toLowerCase().includes(safeName.toLowerCase())) {
-            setScanFile({
-              reused: true,
-              fileHandle: entryHandle,
-              safeName,
-              name: entryName
-            });
-            console.log("Found old scan from checkout:", entryName);
-            break;
-          }
-        }
-      }
+  const parsed = buildScanFolders(match.scanInfo.checkInDate);
+  if (!parsed) {
+    console.warn("Invalid checkInDate for scan:", match.scanInfo.checkInDate);
+    return;
+  }
+
+  const { year: oldYear, month: oldMonth, folder: oldDateFolder } = parsed;
+  const oldScanDir = await ensurePath(base, ["ScannedDocuments", oldYear, oldMonth, oldDateFolder]);
+
+  for await (const [entryName, entryHandle] of oldScanDir.entries()) {
+    if (entryHandle.kind === "file" && entryName.toLowerCase().includes(safeName.toLowerCase())) {
+      setScanFile({
+        reused: true,
+        fileHandle: entryHandle,
+        safeName,
+        name: entryName
+      });
+      console.log("Found old scan from checkout:", entryName);
+      break;
+    }
+  }
+}
+
     } catch (err) {
       console.warn("Scan reuse failed", err);
     }
@@ -1660,6 +1665,9 @@ function CheckIn({ state, setState, locationState }) {
           {showEditModal && editGuest && (
             <Modal onClose={() => setShowEditModal(false)}>
               <h3 style={{ marginTop: 0 }}>Edit Booking</h3>
+              <div style={{ marginBottom: 8 }}>
+                <input className="input" value={editNameInput} onChange={(e) => setEditNameInput(e.target.value)} />
+              </div>
               <div style={{ marginBottom: 8 }}>
                 <input className="input" value={editRoomsInput} onChange={(e) => setEditRoomsInput(e.target.value)} placeholder="Rooms (comma separated)" />
               </div>
@@ -3481,6 +3489,32 @@ async function loadTodayData() {
   );
 }
 
+function buildScanFolders(dateStr) {
+  if (!dateStr) return null;
+  let d;
+
+  // case 1: ISO yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    d = new Date(dateStr + "T00:00:00");
+  }
+  // case 2: dd/mm/yyyy
+  else if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+    const [dd, mm, yyyy] = dateStr.split("/");
+    d = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  }
+  // fallback
+  else {
+    d = new Date(dateStr);
+  }
+
+  if (isNaN(d)) return null;
+
+  const year = String(d.getFullYear());
+  const month = d.toLocaleString("en-US", { month: "short" }).toLowerCase();
+  const folder = `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${year}`;
+
+  return { year, month, folder };
+}
 // Helper to get YYYY-MM-DD string
 
 function Analysis() {
