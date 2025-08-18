@@ -19,11 +19,15 @@ app.post('/register', async (req, res) => {
     const token = nanoid(8);
     const data = req.body || {};
   const file = path.join(STORE_DIR, id + '.json');
-  // store optional rents/expenses/reservations if provided
-  try { fs.writeFileSync(file, JSON.stringify({ id, token, state: data.state || null, rents: data.rents || [], expenses: data.expenses || [], reservations: data.reservations || [], created: Date.now() }, null, 2)); } catch (e) { console.error('write failed', e); }
+  // allow creating a public snapshot (no token required to view) if requested
+  const isPublic = !!data.public;
+  const snapshot = { id, token, public: isPublic, state: data.state || null, rents: data.rents || [], expenses: data.expenses || [], reservations: data.reservations || [], created: Date.now() };
+  try { fs.writeFileSync(file, JSON.stringify(snapshot, null, 2)); } catch (e) { console.error('write failed', e); }
     // notify any listeners (none at registration)
-    const url = `${req.protocol}://${req.get('host')}/s/${id}?k=${token}`;
-    res.json({ id, url, token });
+    const base = `${req.protocol}://${req.get('host')}`;
+    const secureUrl = `${base}/s/${id}?k=${token}`;
+    const publicUrl = isPublic ? `${base}/m/${id}` : null;
+    res.json({ id, url: secureUrl, token, publicUrl });
   } catch (err) {
     console.error('register failed', err);
     res.status(500).json({ error: String(err) });
@@ -70,8 +74,11 @@ app.get('/sse/:id', (req, res) => {
   const provided = req.query.k || req.get('x-share-token');
   const file = path.join(STORE_DIR, id + '.json');
   if (!fs.existsSync(file)) return res.status(404).send('Not found');
-  // validate token
-  try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); if (parsed.token && String(parsed.token) !== String(provided)) return res.status(403).send('invalid-token'); } catch(e) { }
+  // validate token unless snapshot is public
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed.public && parsed.token && String(parsed.token) !== String(provided)) return res.status(403).send('invalid-token');
+  } catch(e) { }
   // Headers for SSE
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -102,8 +109,8 @@ app.get('/s/:id', (req, res) => {
   const provided = req.query.k || req.get('x-share-token');
   const file = path.join(STORE_DIR, id + '.json');
   if (!fs.existsSync(file)) return res.status(404).send('Not found');
-  // validate token for viewer
-  try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); if (parsed.token && String(parsed.token) !== String(provided)) return res.status(403).send('invalid-token'); } catch(e) { }
+  // validate token for viewer unless snapshot is public
+  try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); if (!parsed.public && parsed.token && String(parsed.token) !== String(provided)) return res.status(403).send('invalid-token'); } catch(e) { }
   const serverBase = `${req.protocol}://${req.get('host')}`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live View ${id}</title>
   <style>

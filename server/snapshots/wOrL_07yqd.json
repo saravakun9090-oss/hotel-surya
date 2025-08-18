@@ -259,18 +259,9 @@
         },
         {
           "number": 502,
-          "status": "occupied",
+          "status": "free",
           "rate": 2500,
-          "guest": {
-            "name": "sagar seal",
-            "contact": "check",
-            "id": "",
-            "checkIn": "2025-08-17T12:29:13.027Z",
-            "checkInDate": "8/17/2025",
-            "checkInTime": "5:59:13 PM",
-            "rate": 2000,
-            "edited": false
-          },
+          "guest": null,
           "reservedFor": null
         },
         {
@@ -291,18 +282,9 @@
         },
         {
           "number": 504,
-          "status": "occupied",
+          "status": "free",
           "rate": 2500,
-          "guest": {
-            "name": "sarava",
-            "contact": "20003663",
-            "id": "",
-            "checkIn": "2025-08-17T11:50:35.350Z",
-            "checkInDate": "8/17/2025",
-            "checkInTime": "5:20:35 PM",
-            "rate": 2000,
-            "edited": false
-          },
+          "guest": null,
           "reservedFor": null
         }
       ]
@@ -323,38 +305,10 @@
         "edited": true
       },
       {
-        "room": 401,
-        "name": "justgaian",
-        "contact": "23456789",
-        "checkIn": "2025-08-17T10:29:42.416Z",
-        "edited": false
-      },
-      {
         "room": 301,
         "name": "sagar seal",
         "contact": "`123456789",
         "checkIn": "2025-08-17T12:13:27.825Z",
-        "edited": false
-      },
-      {
-        "room": 502,
-        "name": "sagar seal",
-        "contact": "check",
-        "checkIn": "2025-08-17T12:29:13.027Z",
-        "edited": false
-      },
-      {
-        "room": 504,
-        "name": "sarava",
-        "contact": "20003663",
-        "checkIn": "2025-08-17T11:50:35.350Z",
-        "edited": false
-      },
-      {
-        "room": 403,
-        "name": "saravana ",
-        "contact": "",
-        "checkIn": "2025-08-17T11:43:00.399Z",
         "edited": false
       },
       {
@@ -365,11 +319,18 @@
         "edited": true
       },
       {
-        "room": 202,
-        "name": "saravana",
-        "contact": "7558178181",
-        "checkIn": "2025-08-17T11:55:20.015Z",
-        "edited": true
+        "room": 401,
+        "name": "justgaian",
+        "contact": "23456789",
+        "checkIn": "2025-08-17T10:29:42.416Z",
+        "edited": false
+      },
+      {
+        "room": 403,
+        "name": "saravana ",
+        "contact": "",
+        "checkIn": "2025-08-17T11:43:00.399Z",
+        "edited": false
       },
       {
         "room": 402,
@@ -379,17 +340,10 @@
         "edited": true
       },
       {
-        "room": 404,
-        "name": "saravanatest",
-        "contact": "4567",
-        "checkIn": "2025-08-17T10:55:12.592Z",
-        "edited": false
-      },
-      {
-        "room": 102,
-        "name": "saravana ",
-        "contact": "13123",
-        "checkIn": "2025-08-17T11:54:01.549Z",
+        "room": 202,
+        "name": "saravana",
+        "contact": "7558178181",
+        "checkIn": "2025-08-17T11:55:20.015Z",
         "edited": true
       },
       {
@@ -400,17 +354,24 @@
         "edited": false
       },
       {
+        "room": 102,
+        "name": "saravana ",
+        "contact": "13123",
+        "checkIn": "2025-08-17T11:54:01.549Z",
+        "edited": true
+      },
+      {
+        "room": 404,
+        "name": "saravanatest",
+        "contact": "4567",
+        "checkIn": "2025-08-17T10:55:12.592Z",
+        "edited": false
+      },
+      {
         "room": 201,
         "name": "kkkkkk",
         "contact": "23456789",
         "checkIn": "2025-08-18T05:28:11.050Z",
-        "edited": false
-      },
-      {
-        "room": 104,
-        "name": "ppppppp",
-        "contact": "567890",
-        "checkIn": "2025-08-18T03:57:59.136Z",
         "edited": false
       },
       {
@@ -425,6 +386,13 @@
         "name": "xxxxxxxxxxxxxx",
         "contact": "yyyyyyyyyyyyyy",
         "checkIn": "2025-08-18T03:42:57.280Z",
+        "edited": false
+      },
+      {
+        "room": 104,
+        "name": "ppppppp",
+        "contact": "567890",
+        "checkIn": "2025-08-18T03:57:59.136Z",
         "edited": false
       }
     ],
@@ -828,5 +796,6 @@
       "date": "2025-08-19"
     }
   ],
-  "created": 1755497358708
+  "created": 1755497358708,
+  "updated": 1755498977070
 }

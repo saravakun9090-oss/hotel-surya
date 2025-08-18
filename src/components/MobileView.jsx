@@ -154,19 +154,20 @@ export default function MobileView({ state }) {
       setSharing(true);
       setShareLink('');
       const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+      // request a public snapshot so the link is usable from any device without token
       const resp = await fetch(`${server.replace(/\/$/, '')}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []) })
+        body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []), public: true })
       });
       if (!resp.ok) throw new Error('Server error: ' + resp.status);
       const data = await resp.json();
-      setShareLink(data.url || (server + '/s/' + (data.id || '')));
+  setShareLink(data.url || (server + '/s/' + (data.id || '')));
       if (data.id) {
         setPermanentId(data.id);
         localStorage.setItem('mobile_share_id', data.id);
-  // public permanent link (no token)
-  try { setPublicLink(((window?.SHARE_SERVER_URL) || 'http://localhost:4000').replace(/\/$/, '') + '/m/' + data.id); } catch (e) {}
+  // public permanent link (no token) - prefer server-returned publicUrl
+  try { setPublicLink(data.publicUrl || (((window?.SHARE_SERVER_URL) || 'http://localhost:4000').replace(/\/$/, '') + '/m/' + data.id)); } catch (e) {}
       }
       if (data.token) {
         setShareToken(data.token);

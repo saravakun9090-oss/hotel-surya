@@ -1,6 +1,7 @@
 {
-  "id": "gPCy62t7Dk",
-  "token": "2vwk3vJ2",
+  "id": "1RNbjYZr0u",
+  "token": "QUG8Me8z",
+  "public": false,
   "state": {
     "floors": {
       "1": [
@@ -259,9 +260,18 @@
         },
         {
           "number": 502,
-          "status": "free",
+          "status": "occupied",
           "rate": 2500,
-          "guest": null,
+          "guest": {
+            "name": "sagar seal",
+            "contact": "check",
+            "id": "",
+            "checkIn": "2025-08-17T12:29:13.027Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "5:59:13 PM",
+            "rate": 2000,
+            "edited": false
+          },
           "reservedFor": null
         },
         {
@@ -282,9 +292,18 @@
         },
         {
           "number": 504,
-          "status": "free",
+          "status": "occupied",
           "rate": 2500,
-          "guest": null,
+          "guest": {
+            "name": "sarava",
+            "contact": "20003663",
+            "id": "",
+            "checkIn": "2025-08-17T11:50:35.350Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "5:20:35 PM",
+            "rate": 2000,
+            "edited": false
+          },
           "reservedFor": null
         }
       ]
@@ -305,13 +324,6 @@
         "edited": true
       },
       {
-        "room": 401,
-        "name": "justgaian",
-        "contact": "23456789",
-        "checkIn": "2025-08-17T10:29:42.416Z",
-        "edited": false
-      },
-      {
         "room": 301,
         "name": "sagar seal",
         "contact": "`123456789",
@@ -319,10 +331,31 @@
         "edited": false
       },
       {
+        "room": 401,
+        "name": "justgaian",
+        "contact": "23456789",
+        "checkIn": "2025-08-17T10:29:42.416Z",
+        "edited": false
+      },
+      {
+        "room": 504,
+        "name": "sarava",
+        "contact": "20003663",
+        "checkIn": "2025-08-17T11:50:35.350Z",
+        "edited": false
+      },
+      {
         "room": 403,
         "name": "saravana ",
         "contact": "",
         "checkIn": "2025-08-17T11:43:00.399Z",
+        "edited": false
+      },
+      {
+        "room": 502,
+        "name": "sagar seal",
+        "contact": "check",
+        "checkIn": "2025-08-17T12:29:13.027Z",
         "edited": false
       },
       {
@@ -368,6 +401,13 @@
         "edited": true
       },
       {
+        "room": 201,
+        "name": "kkkkkk",
+        "contact": "23456789",
+        "checkIn": "2025-08-18T05:28:11.050Z",
+        "edited": false
+      },
+      {
         "room": 104,
         "name": "ppppppp",
         "contact": "567890",
@@ -386,13 +426,6 @@
         "name": "xxxxxxxxxxxxxx",
         "contact": "yyyyyyyyyyyyyy",
         "checkIn": "2025-08-18T03:42:57.280Z",
-        "edited": false
-      },
-      {
-        "room": 201,
-        "name": "kkkkkk",
-        "contact": "23456789",
-        "checkIn": "2025-08-18T05:28:11.050Z",
         "edited": false
       }
     ],
@@ -477,6 +510,17 @@
     {
       "name": "account",
       "room": [
+        401
+      ],
+      "days": "1",
+      "amount": "2000",
+      "mode": "Cash",
+      "date": "2025-08-17T09:24:35.944Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "account",
+      "room": [
         201
       ],
       "days": "1",
@@ -495,17 +539,6 @@
       "amount": "1000",
       "mode": "Cash",
       "date": "2025-08-17T06:20:30.054Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "account",
-      "room": [
-        401
-      ],
-      "days": "1",
-      "amount": "2000",
-      "mode": "Cash",
-      "date": "2025-08-17T09:24:35.944Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -553,14 +586,14 @@
       "_dateFolder": "2025-08-17"
     },
     {
-      "name": "saravana",
+      "name": "sagar seal",
       "room": [
-        103
+        502
       ],
       "days": "1",
-      "amount": "2000",
+      "amount": "1000",
       "mode": "Cash",
-      "date": "2025-08-17T05:52:46.369Z",
+      "date": "2025-08-17T09:10:08.269Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -580,42 +613,20 @@
         103
       ],
       "days": "1",
-      "amount": "500",
-      "mode": "Cash",
-      "date": "2025-08-17T14:35:14.887Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "saravana",
-      "room": [
-        202
-      ],
-      "days": "1",
-      "amount": "500",
-      "mode": "Cash",
-      "date": "2025-08-17T13:48:22.758Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "sagar seal",
-      "room": [
-        502
-      ],
-      "days": "1",
       "amount": "1000",
       "mode": "Cash",
-      "date": "2025-08-17T09:10:08.269Z",
+      "date": "2025-08-17T14:10:07.345Z",
       "_dateFolder": "2025-08-17"
     },
     {
       "name": "saravana",
       "room": [
-        202
+        103
       ],
       "days": "1",
-      "amount": "500",
+      "amount": "2000",
       "mode": "Cash",
-      "date": "2025-08-17T14:11:34.982Z",
+      "date": "2025-08-17T05:52:46.369Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -632,23 +643,23 @@
     {
       "name": "saravana",
       "room": [
+        202
+      ],
+      "days": "1",
+      "amount": "500",
+      "mode": "Cash",
+      "date": "2025-08-17T14:11:34.982Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "saravana",
+      "room": [
         402
       ],
       "days": "1",
       "amount": "1000",
       "mode": "Cash",
       "date": "2025-08-17T13:33:23.389Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "saravana",
-      "room": [
-        103
-      ],
-      "days": "1",
-      "amount": "1000",
-      "mode": "Cash",
-      "date": "2025-08-17T14:10:07.345Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -703,6 +714,17 @@
       "_dateFolder": "2025-08-17"
     },
     {
+      "name": "saravana",
+      "room": [
+        103
+      ],
+      "days": "1",
+      "amount": "500",
+      "mode": "Cash",
+      "date": "2025-08-17T14:35:14.887Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
       "name": "saravana ",
       "room": [
         102
@@ -730,9 +752,20 @@
         504
       ],
       "days": "1",
-      "amount": "2000",
+      "amount": "3000",
       "mode": "Cash",
-      "date": "2025-08-17T09:06:29.415Z",
+      "date": "2025-08-17T09:05:41.821Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "saravana",
+      "room": [
+        202
+      ],
+      "days": "1",
+      "amount": "500",
+      "mode": "Cash",
+      "date": "2025-08-17T13:48:22.758Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -741,9 +774,9 @@
         504
       ],
       "days": "1",
-      "amount": "3000",
+      "amount": "2000",
       "mode": "Cash",
-      "date": "2025-08-17T09:05:41.821Z",
+      "date": "2025-08-17T09:06:29.415Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -796,6 +829,5 @@
       "date": "2025-08-19"
     }
   ],
-  "created": 1755496388330,
-  "updated": 1755499615727
+  "created": 1755499615723
 }
