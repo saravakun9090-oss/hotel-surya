@@ -3893,6 +3893,31 @@ export default function App() {
   const [state, setState] = useState(loadState());
   useEffect(() => { saveState(state); }, [state]);
 
+  // push state updates to share server if a permanent id is registered
+  useEffect(() => {
+    let timer = null;
+    const id = localStorage.getItem('mobile_share_id');
+  const token = localStorage.getItem('mobile_share_token');
+    if (!id) return;
+    const push = async () => {
+      try {
+        const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+    const url = `${server.replace(/\/$/, '')}/update/${id}` + (token ? ('?k=' + encodeURIComponent(token)) : '');
+    // include recent rents/expenses/reservations if available on window to enrich snapshot
+    const payload = { state };
+    if (window.__MOBILE_SHARE_EXTRA__) {
+      try { Object.assign(payload, window.__MOBILE_SHARE_EXTRA__); } catch(e) { }
+    }
+    await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+      } catch (err) { /* ignore */ }
+    };
+    // debounce updates to once per 800ms
+    timer = setTimeout(push, 800);
+    return () => { if (timer) clearTimeout(timer); };
+  }, [state]);
+
   useEffect(() => {
   (async () => {
     const base = await getBaseFolder();

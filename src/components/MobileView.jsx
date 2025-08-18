@@ -13,6 +13,22 @@ export default function MobileView({ state }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [shareLink, setShareLink] = useState('');
+  const [shareError, setShareError] = useState('');
+  const [permanentId, setPermanentId] = useState(() => localStorage.getItem('mobile_share_id') || '');
+  const [shareToken, setShareToken] = useState(() => localStorage.getItem('mobile_share_token') || '');
+  const [sseConnected, setSseConnected] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  // per-section searches / filters
+  const [guestSearch, setGuestSearch] = useState('');
+  const [guestFloorFilter, setGuestFloorFilter] = useState('all');
+  const [checkoutSearch, setCheckoutSearch] = useState('');
+  const [checkoutFloorFilter, setCheckoutFloorFilter] = useState('all');
+  const [rentSearch, setRentSearch] = useState('');
+  const [rentDateFilter, setRentDateFilter] = useState('');
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseDateFilter, setExpenseDateFilter] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -80,6 +96,19 @@ export default function MobileView({ state }) {
     }
   }
 
+  // derive floors list for filters
+  const floorKeys = Object.keys(state.floors || {}).sort((a,b)=>Number(a)-Number(b));
+
+  // checkouts: treat any occupied room as a potential checkout
+  const checkoutList = [];
+  for (const floorArr of Object.values(state.floors || {})) {
+    for (const r of floorArr) {
+      if (r.status === 'occupied') {
+        checkoutList.push({ room: r.number, guest: r.guest || {}, floor: Math.floor(r.number/100) });
+      }
+    }
+  }
+
   const reservations = (state.reservations || []).map(r => ({ name: r.name, room: r.room, date: r.date, place: r.place }));
 
   const searchFilter = (item) => {
@@ -117,24 +146,162 @@ export default function MobileView({ state }) {
     }
   }
 
+  async function shareSnapshot() {
+    try {
+      setShareError('');
+      setSharing(true);
+      setShareLink('');
+      const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+      const resp = await fetch(`${server.replace(/\/$/, '')}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []) })
+      });
+      if (!resp.ok) throw new Error('Server error: ' + resp.status);
+      const data = await resp.json();
+      setShareLink(data.url || (server + '/s/' + (data.id || '')));
+      if (data.id) {
+        setPermanentId(data.id);
+        localStorage.setItem('mobile_share_id', data.id);
+      }
+      if (data.token) {
+        setShareToken(data.token);
+        localStorage.setItem('mobile_share_token', data.token);
+      }
+    } catch (err) {
+      console.warn('Share failed', err);
+      setShareError(String(err?.message || err));
+    } finally { setSharing(false); }
+  }
+
+  const copyLink = async () => {
+    if (!shareLink) return;
+    try { await navigator.clipboard.writeText(shareLink); } catch (e) { /* ignore */ }
+  };
+
+  // connect to SSE viewer to show connection status (optional for client)
+  useEffect(() => {
+    if (!permanentId) return;
+    const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+    try {
+      const url = `${server.replace(/\/$/, '')}/sse/${permanentId}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
+      const src = new EventSource(url);
+      src.onopen = () => setSseConnected(true);
+      src.onerror = () => setSseConnected(false);
+      src.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'update' && msg.updated) setLastUpdated(msg.updated);
+          if (msg.type === 'init' && msg.updated) setLastUpdated(msg.updated);
+        } catch (e) { /* ignore */ }
+      };
+      return () => src.close();
+    } catch (e) { setSseConnected(false); }
+  }, [permanentId]);
+
+  async function pushNow() {
+    const id = permanentId || localStorage.getItem('mobile_share_id');
+    if (!id) return alert('No permanent id registered');
+    try {
+      const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+      const url = `${server.replace(/\/$/, '')}/update/${id}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
+      const resp = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []) })
+      });
+      if (!resp.ok) throw new Error('update failed ' + resp.status);
+      alert('Pushed update');
+    } catch (err) {
+      console.warn('pushNow failed', err);
+      alert('Push failed: ' + String(err?.message || err));
+    }
+  }
+
+  // expose extra payload globally so App.jsx can include it in debounced background pushes
+  useEffect(() => {
+    try { window.__MOBILE_SHARE_EXTRA__ = { rents, expenses, reservations: (state.reservations || []) }; } catch (e) { }
+    return () => { try { delete window.__MOBILE_SHARE_EXTRA__; } catch (e) { } };
+  }, [rents, expenses, state.reservations]);
+
+  // filtering helpers for sections
+  const matchText = (item, txt) => {
+    const q = String(txt || '').trim().toLowerCase();
+    if (!q) return true;
+    return Object.values(item).some(v => String(v || '').toLowerCase().includes(q));
+  };
+
   return (
-    <div style={{ padding: 12 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+    <div style={{ padding: 10, maxWidth: 920, margin: '0 auto' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
         <button className="btn" onClick={() => navigate(-1)}>Back</button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Mobile View</h2>
+        <h2 style={{ margin: 0, fontSize: 18, flex: 1 }}>Mobile View</h2>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!permanentId ? (
+            <button className="btn primary" onClick={shareSnapshot} disabled={sharing} style={{ padding: '6px 10px' }}>{sharing ? 'Creating...' : 'Create Permanent Link'}</button>
+          ) : (
+            <>
+              <a className="btn" href={(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId} target="_blank" rel="noreferrer">Open Viewer</a>
+              <button className="btn" onClick={copyLink}>Copy Link</button>
+              <button className="btn" onClick={pushNow}>Push now</button>
+            </>
+          )}
+        </div>
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <input className="input" placeholder="Search bookings, guest, room, date..." value={query} onChange={e=>setQuery(e.target.value)} />
+        <input className="input" placeholder="Global search bookings, guest, room, date..." value={query} onChange={e=>setQuery(e.target.value)} />
       </div>
+
+      {/* ROOM GRID */}
+      <div style={{ marginBottom: 12 }}>
+        <h3 style={{ margin: '8px 0' }}>Rooms</h3>
+        <div className="card" style={{ padding: 10 }}>
+          {floorKeys.map(f => (
+            <div key={f} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Floor {f}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                {state.floors[f].map(r => (
+                  <div key={r.number} style={{
+                    height: 56,
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: r.status === 'occupied' ? 'green' : (r.status === 'reserved' ? 'orange' : '#e9ecef')
+                  }}>{r.number}</div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {shareError && <div style={{ color: 'red', marginBottom: 8 }}>{shareError}</div>}
+      {permanentId && (
+        <div className="card" style={{ padding: 8, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId + (shareToken ? ('?k=' + shareToken) : '')}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ fontSize: 12, color: sseConnected ? 'green' : 'orange' }}>{sseConnected ? 'Live' : 'Disconnected'}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{lastUpdated ? new Date(lastUpdated).toLocaleString() : ''}</div>
+          </div>
+        </div>
+      )}
 
       <section style={{ marginBottom: 18 }}>
         <h3 style={{ margin: '8px 0' }}>Current Guests</h3>
-        {currentGuests.filter(searchFilter).length === 0 ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input className="input" placeholder="Search guests..." value={guestSearch} onChange={e=>setGuestSearch(e.target.value)} />
+          <select className="input" value={guestFloorFilter} onChange={e=>setGuestFloorFilter(e.target.value)}>
+            <option value="all">All floors</option>
+            {floorKeys.map(f=> <option key={f} value={f}>Floor {f}</option>)}
+          </select>
+        </div>
+        {currentGuests.filter(g => matchText(g, guestSearch) && (guestFloorFilter==='all' || String(Math.floor((g.rooms[0]||0)/100)) === String(guestFloorFilter))).length === 0 ? (
           <div style={{ color: 'var(--muted)' }}>No current guests</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {currentGuests.filter(searchFilter).map((g, i) => (
+            {currentGuests.filter(g => matchText(g, guestSearch) && (guestFloorFilter==='all' || String(Math.floor((g.rooms[0]||0)/100)) === String(guestFloorFilter))).map((g, i) => (
               <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontWeight: 700 }}>{g.name}</div>
@@ -142,6 +309,35 @@ export default function MobileView({ state }) {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn" onClick={() => openScannedForGuest(g)}>Open ID</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginBottom: 18 }}>
+        <h3 style={{ margin: '8px 0' }}>Checkouts</h3>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input className="input" placeholder="Search checkouts..." value={checkoutSearch} onChange={e=>setCheckoutSearch(e.target.value)} />
+          <select className="input" value={checkoutFloorFilter} onChange={e=>setCheckoutFloorFilter(e.target.value)}>
+            <option value="all">All floors</option>
+            {floorKeys.map(f=> <option key={f} value={f}>Floor {f}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 8, color: 'var(--muted)' }}>Total checkouts: {checkoutList.length}</div>
+        {checkoutList.filter(c => matchText(c, checkoutSearch) && (checkoutFloorFilter==='all' || String(c.floor) === String(checkoutFloorFilter))).length === 0 ? (
+          <div style={{ color: 'var(--muted)' }}>No checkouts</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {checkoutList.filter(c => matchText(c, checkoutSearch) && (checkoutFloorFilter==='all' || String(c.floor) === String(checkoutFloorFilter))).map((c, i) => (
+              <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{c.guest?.name || 'Unknown'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {c.room}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.guest?.contact || ''}</div>
                 </div>
               </div>
             ))}
@@ -172,11 +368,15 @@ export default function MobileView({ state }) {
 
       <section style={{ marginBottom: 18 }}>
         <h3 style={{ margin: '8px 0' }}>Recent Rent Payments</h3>
-        {loading ? <div>Loading...</div> : rents.filter(searchFilter).length === 0 ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input className="input" placeholder="Search rents..." value={rentSearch} onChange={e=>setRentSearch(e.target.value)} />
+          <input className="input" placeholder="Filter by date (YYYY-MM-DD)" value={rentDateFilter} onChange={e=>setRentDateFilter(e.target.value)} />
+        </div>
+        {loading ? <div>Loading...</div> : rents.filter(r => matchText(r, rentSearch) && (!rentDateFilter || String(r._dateFolder||'').includes(rentDateFilter))).length === 0 ? (
           <div style={{ color: 'var(--muted)' }}>No rent records</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {rents.filter(searchFilter).slice(0,50).map((r, i) => (
+            {rents.filter(r => matchText(r, rentSearch) && (!rentDateFilter || String(r._dateFolder||'').includes(rentDateFilter))).slice(0,50).map((r, i) => (
               <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700 }}>{r.name}</div>
@@ -191,11 +391,15 @@ export default function MobileView({ state }) {
 
       <section>
         <h3 style={{ margin: '8px 0' }}>Recent Expenses</h3>
-        {loading ? <div>Loading...</div> : expenses.filter(searchFilter).length === 0 ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input className="input" placeholder="Search expenses..." value={expenseSearch} onChange={e=>setExpenseSearch(e.target.value)} />
+          <input className="input" placeholder="Filter by date (YYYY-MM-DD)" value={expenseDateFilter} onChange={e=>setExpenseDateFilter(e.target.value)} />
+        </div>
+        {loading ? <div>Loading...</div> : expenses.filter(e => matchText(e, expenseSearch) && (!expenseDateFilter || String(e._dateFolder||'').includes(expenseDateFilter))).length === 0 ? (
           <div style={{ color: 'var(--muted)' }}>No expense records</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {expenses.filter(searchFilter).slice(0,50).map((e, i) => (
+            {expenses.filter(e => matchText(e, expenseSearch) && (!expenseDateFilter || String(e._dateFolder||'').includes(expenseDateFilter))).slice(0,50).map((e, i) => (
               <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 700 }}>{e.description}</div>
