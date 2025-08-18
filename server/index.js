@@ -104,6 +104,7 @@ app.get('/s/:id', (req, res) => {
   if (!fs.existsSync(file)) return res.status(404).send('Not found');
   // validate token for viewer
   try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); if (parsed.token && String(parsed.token) !== String(provided)) return res.status(403).send('invalid-token'); } catch(e) { }
+  const serverBase = `${req.protocol}://${req.get('host')}`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live View ${id}</title>
   <style>
     :root{--bg:#f6f6f6;--card:#fff;--muted:#666;--accent:#0b74de}
@@ -215,7 +216,8 @@ app.get('/s/:id', (req, res) => {
   </div>
 
   <script>
-    const id = ${JSON.stringify(id)};
+  const SERVER_BASE = ${JSON.stringify(serverBase)}; // absolute share server base so viewer can be hosted elsewhere
+  const id = ${JSON.stringify(id)};
     let currentState = {};
     let createdTs = null;
     let updatedTs = null;
@@ -328,7 +330,7 @@ app.get('/s/:id', (req, res) => {
   // include token if present in query string when opening SSE
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get('k');
-  const sseUrl = '/sse/' + id + (token ? ('?k=' + encodeURIComponent(token)) : '');
+  const sseUrl = SERVER_BASE + '/sse/' + id + (token ? ('?k=' + encodeURIComponent(token)) : '');
   const evt = new EventSource(sseUrl);
     evt.onopen = () => { metaEl.textContent = 'Connected'; };
     evt.onmessage = (ev) => {
