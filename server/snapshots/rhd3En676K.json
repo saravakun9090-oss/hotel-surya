@@ -1,0 +1,248 @@
+{
+  "id": "rhd3En676K",
+  "token": "u9o87F-s",
+  "public": true,
+  "advertisedBase": "http://192.168.1.2:4000",
+  "state": {
+    "floors": {
+      "1": [
+        {
+          "number": 101,
+          "status": "occupied",
+          "rate": 2500,
+          "guest": {
+            "name": "saravana",
+            "contact": "12000",
+            "id": "",
+            "checkIn": "2025-08-17T12:36:29.878Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "6:06:29 PM",
+            "rate": 2000,
+            "edited": false
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 102,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 103,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 104,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "2": [
+        {
+          "number": 201,
+          "status": "occupied",
+          "rate": 2500,
+          "guest": {
+            "name": "saravana",
+            "contact": "129229",
+            "id": "",
+            "checkIn": "2025-08-17T12:47:26.849Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "6:17:26 PM",
+            "rate": 2000,
+            "edited": false
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 202,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 203,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 204,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "3": [
+        {
+          "number": 301,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 302,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 303,
+          "status": "occupied",
+          "rate": 2500,
+          "guest": {
+            "name": "saravana",
+            "contact": "1212121",
+            "id": "",
+            "checkIn": "2025-08-17T13:27:25.188Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "6:57:25 PM",
+            "rate": 1000,
+            "edited": false
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 304,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "4": [
+        {
+          "number": 401,
+          "status": "occupied",
+          "rate": 2500,
+          "guest": {
+            "name": "saravana",
+            "contact": "1212121",
+            "id": "",
+            "checkIn": "2025-08-17T12:55:30.019Z",
+            "checkInDate": "8/17/2025",
+            "checkInTime": "6:25:30 PM",
+            "rate": 2000,
+            "edited": false
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 402,
+          "status": "occupied",
+          "rate": 2500,
+          "guest": {
+            "name": "check",
+            "contact": "5678",
+            "id": "",
+            "checkIn": "2025-08-15T12:51:17.610Z",
+            "checkInDate": "8/15/2025",
+            "checkInTime": "6:21:17 PM",
+            "rate": 2000,
+            "edited": false
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 403,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 404,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "5": [
+        {
+          "number": 501,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 502,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 503,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 504,
+          "status": "free",
+          "rate": 2500,
+          "guest": null,
+          "reservedFor": null
+        }
+      ]
+    },
+    "guests": [
+      {
+        "room": 402,
+        "name": "check",
+        "contact": "5678",
+        "checkIn": "2025-08-15T12:51:17.610Z",
+        "edited": false
+      },
+      {
+        "room": 101,
+        "name": "saravana",
+        "contact": "12000",
+        "checkIn": "2025-08-17T12:36:29.878Z",
+        "edited": false
+      },
+      {
+        "room": 201,
+        "name": "saravana",
+        "contact": "129229",
+        "checkIn": "2025-08-17T12:47:26.849Z",
+        "edited": false
+      },
+      {
+        "room": 303,
+        "name": "saravana",
+        "contact": "1212121",
+        "checkIn": "2025-08-17T13:27:25.188Z",
+        "edited": false
+      },
+      {
+        "room": 401,
+        "name": "saravana",
+        "contact": "1212121",
+        "checkIn": "2025-08-17T12:55:30.019Z",
+        "edited": false
+      }
+    ],
+    "reservations": []
+  },
+  "rents": [],
+  "expenses": [],
+  "reservations": [],
+  "created": 1755515565887,
+  "updated": 1755515617980
+}

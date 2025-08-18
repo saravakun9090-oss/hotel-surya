@@ -7,10 +7,6 @@ import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
-// MobileView replaced by server-hosted public mobile viewer (/m/:id)
-import SharedViewer from './components/SharedViewer';
-import LiveUpdates from './components/LiveUpdates';
-import PublicLive from './components/PublicLive';
 
 
 import {
@@ -75,15 +71,14 @@ const Sidebar = () => (
     <div className="logo">🏨 HOTEL SURYA</div>
     <div className="subtitle">Manage check-ins, checkouts & reservations</div>
     <nav className="nav">
-    <Link to="/">Dashboard</Link>
-    <Link to="/checkin">Check-in</Link>
-    <Link to="/checkout">Check-out</Link>
-    <Link to="/reservations">Reservations</Link>
-    <Link to="/floors">Floors</Link>
-    <Link to="/liveupdates">Live Updates</Link>
-    <Link to="/storage">Storage</Link>
-    <Link to="/accounts" className="btn">Accounts</Link>
-  <Link to="/analysis">Analysis</Link>
+      <Link to="/">Dashboard</Link>
+      <Link to="/checkin">Check-in</Link>
+      <Link to="/checkout">Check-out</Link>
+      <Link to="/reservations">Reservations</Link>
+      <Link to="/floors">Floors</Link>
+      <Link to="/storage">Storage</Link>
+      <Link to="/accounts" className="btn">Accounts</Link>
+      <Link to="/analysis">Analysis</Link>
       
 
     </nav>
@@ -3896,8 +3891,6 @@ export default function App() {
   const [state, setState] = useState(loadState());
   useEffect(() => { saveState(state); }, [state]);
 
-  // (mobile share feature removed) previously we pushed state to a local share server when a permanent id was registered.
-
   useEffect(() => {
   (async () => {
     const base = await getBaseFolder();
@@ -3912,7 +3905,7 @@ export default function App() {
       <div className="app-shell">
         <Sidebar />
         <div className="main">
-      <Routes>
+          <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
             <Route path="/floors" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/floors/:floor" element={<FloorsContainer state={state} setState={setState} />} />
@@ -3922,16 +3915,9 @@ export default function App() {
             <Route path="/storage" element={<StorageSetup setState={setState} state={state} />} />
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
-  {/* legacy mobile route removed; use "Open Live Mobile" button on Dashboard */}
-      <Route path="/s/:id" element={<SharedViewer />} />
-            <Route path="/liveupdates" element={<LiveUpdates />} />
-            <Route path="/liveupdate173" element={<PublicLive id={'173'} />} />
-            <Route path="/liveupdate/:id" element={<PublicLive />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
-            {/* Public short links like /1214 — placed last so they don't shadow other routes */}
-            <Route path="/:publicId" element={<PublicLive />} />
           </Routes>
         </div>
       </div>

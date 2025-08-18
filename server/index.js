@@ -71,6 +71,13 @@ app.post('/register', async (req, res) => {
   // prefer netlifyUrl when available for sharing; otherwise use publicUrl (server-hosted)
   const primaryPublicUrl = netlifyUrl || publicUrl || null;
   res.json({ id, url: secureUrl, token, publicUrl: primaryPublicUrl, netlifyUrl: netlifyUrl || undefined, advertisedBase: advertisedBase || undefined });
+  // notify owner SSE clients about new snapshot
+  try {
+    const payload = JSON.stringify({ type: 'snapshot-create', id, snapshot });
+    for (const r of ownerSseClients) {
+      try { r.write(`data: ${payload}\n\n`); } catch (e) { /* ignore individual errors */ }
+    }
+  } catch (e) { /* ignore */ }
   } catch (err) {
     console.error('register failed', err);
     res.status(500).json({ error: String(err) });
@@ -102,6 +109,13 @@ app.post('/update/:id', async (req, res) => {
       for (const resStream of clients) {
         try { resStream.write(`data: ${payload}\n\n`); } catch (e) { /* ignore */ }
       }
+    // notify owner SSE clients about snapshot update
+    try {
+      const ownerPayload = JSON.stringify({ type: 'snapshot-update', id, snapshot: parsed });
+      for (const r of ownerSseClients) {
+        try { r.write(`data: ${ownerPayload}\n\n`); } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* ignore */ }
     res.json({ ok: true });
   } catch (err) {
     console.error('update failed', err);
@@ -111,6 +125,8 @@ app.post('/update/:id', async (req, res) => {
 
 // SSE clients map: id -> array of response streams
 const sseClients = {};
+// Owner SSE clients (receive events for all snapshots)
+const ownerSseClients = [];
 
 app.get('/sse/:id', (req, res) => {
   const id = req.params.id;
@@ -567,6 +583,102 @@ app.get('/m/:id', (req, res) => {
     function renderPageExpenses(){ const ex = state.expenses||[]; const el=document.getElementById('page-expenses'); el.innerHTML = (ex||[]).map(e=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml(e.description||'')+'</div><div style="font-size:12px;color:var(--muted)">'+escapeHtml(e._dateFolder||e.date||'')+'</div><div style="font-weight:800">₹'+escapeHtml(e.amount||'0')+'</div></div>').join('')||'<div style="color:var(--muted)">No expenses</div>'; }
   </script>
   </div></body></html>`;
+  res.send(html);
+});
+
+// Helper to validate owner key
+function validateOwner(req) {
+  const ownerKey = process.env.OWNER_KEY || null;
+  if (!ownerKey) return { ok: false, code: 403, msg: 'OWNER_KEY not configured on server' };
+  const provided = req.query.owner_key || req.get('x-owner-key') || null;
+  if (!provided || String(provided) !== String(ownerKey)) return { ok: false, code: 403, msg: 'invalid-owner-key' };
+  return { ok: true };
+}
+
+// Owner SSE - receive live events for all snapshots (requires OWNER_KEY)
+app.get('/owner/sse', (req, res) => {
+  const v = validateOwner(req);
+  if (!v.ok) return res.status(v.code).json({ error: v.msg });
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive'
+  });
+  res.write('\n');
+  // send initial list of snapshots
+  try {
+    const files = fs.readdirSync(STORE_DIR).filter(f => f.endsWith('.json'));
+    const snapshots = files.map(f => {
+      try { return JSON.parse(fs.readFileSync(path.join(STORE_DIR, f), 'utf8')); } catch(e){ return null }
+    }).filter(Boolean);
+    const payload = JSON.stringify({ type: 'init', snapshots });
+    res.write(`data: ${payload}\n\n`);
+  } catch (e) { /* ignore */ }
+  ownerSseClients.push(res);
+  req.on('close', () => {
+    const idx = ownerSseClients.indexOf(res);
+    if (idx !== -1) ownerSseClients.splice(idx, 1);
+  });
+});
+
+// Owner list endpoint - JSON summary of all snapshots (requires OWNER_KEY)
+app.get('/owner/list', (req, res) => {
+  const v = validateOwner(req);
+  if (!v.ok) return res.status(v.code).json({ error: v.msg });
+  try {
+    const files = fs.readdirSync(STORE_DIR).filter(f => f.endsWith('.json'));
+    const list = files.map(f => {
+      try {
+        const p = JSON.parse(fs.readFileSync(path.join(STORE_DIR, f), 'utf8'));
+        const state = p.state || {};
+        // compute occupied count
+        let occupied = 0;
+        try { for (const fa of Object.values(state.floors||{})) for (const r of fa) if (r.status === 'occupied') occupied++; } catch(e){}
+        return { id: p.id, public: !!p.public, created: p.created || null, updated: p.updated || null, rents: (p.rents||[]).length, expenses: (p.expenses||[]).length, reservations: (p.reservations||[]).length, occupied };
+      } catch (e) { return null }
+    }).filter(Boolean);
+    res.json({ ok: true, list });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// Owner dashboard - simple combined viewer (requires OWNER_KEY)
+app.get('/owner/dashboard', (req, res) => {
+  const v = validateOwner(req);
+  if (!v.ok) return res.status(v.code).send(v.msg);
+  // minimal combined HTML dashboard that connects to /owner/sse
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Owner Dashboard</title>
+  <style>body{font-family:system-ui,Segoe UI,Arial;margin:0;padding:12px;background:#f6f6f6;color:#111} .wrap{max-width:1100px;margin:0 auto} .card{background:#fff;padding:12px;border-radius:8px;margin-bottom:10px} .list{max-height:60vh;overflow:auto}</style>
+  </head><body><div class="wrap"><h2>Owner Dashboard — Live</h2><div class="card"><strong>Meta</strong><div id="meta">Connecting...</div></div>
+  <div class="card"><strong>Current Guests</strong><div id="guests" class="list">Loading...</div></div>
+  <div class="card"><strong>Reservations</strong><div id="reservations" class="list">Loading...</div></div>
+  <div class="card"><strong>Recent Rents</strong><div id="rents" class="list">Loading...</div></div>
+  <div class="card"><strong>Expenses</strong><div id="expenses" class="list">Loading...</div></div></div>
+  <script>
+  const ownerKey = encodeURIComponent('${process.env.OWNER_KEY || ''}');
+  const sse = new EventSource('/owner/sse?owner_key=' + ownerKey);
+  let snapshots = {};
+  function renderAll(){
+    // aggregate guests
+    const guests = [];
+    const reservations = [];
+    const rents = [];
+    const expenses = [];
+    Object.values(snapshots).forEach(p=>{
+      const state = p.state||{};
+      for(const fa of Object.values(state.floors||{})) for(const r of fa) if(r.status==='occupied' && r.guest) guests.push({ hotel: p.id, room: r.number, name: r.guest.name, contact: r.guest.contact });
+      (p.reservations||[]).forEach(x=>reservations.push(Object.assign({ hotel: p.id }, x)));
+      (p.rents||[]).forEach(x=>rents.push(Object.assign({ hotel: p.id }, x)));
+      (p.expenses||[]).forEach(x=>expenses.push(Object.assign({ hotel: p.id }, x)));
+    });
+    document.getElementById('guests').innerHTML = guests.map(g=>'<div style="padding:6px;border-bottom:1px solid #eee"><strong>'+escapeHtml(g.name)+'</strong> — Room '+escapeHtml(g.room)+' @ '+escapeHtml(g.hotel)+'<div style="font-size:12px;color:#666">'+escapeHtml(g.contact||'')+'</div></div>').join('')||'<div style="color:#666">No guests</div>';
+    document.getElementById('reservations').innerHTML = reservations.map(r=>'<div style="padding:6px;border-bottom:1px solid #eee"><strong>'+escapeHtml(r.name||r.guest||'Reservation')+'</strong> — '+escapeHtml(r.room||'')+' <span style="font-size:12px;color:#666">('+escapeHtml(r.date||r._dateFolder||'')+')</span></div>').join('')||'<div style="color:#666">No reservations</div>';
+    document.getElementById('rents').innerHTML = rents.map(r=>'<div style="padding:6px;border-bottom:1px solid #eee"><strong>'+escapeHtml(r.name||r.description||'')+'</strong> — ₹'+escapeHtml(r.amount||'0')+' <span style="font-size:12px;color:#666">@'+escapeHtml(r.hotel)+'</span></div>').join('')||'<div style="color:#666">No rents</div>';
+    document.getElementById('expenses').innerHTML = expenses.map(e=>'<div style="padding:6px;border-bottom:1px solid #eee"><strong>'+escapeHtml(e.description||'')+'</strong> — ₹'+escapeHtml(e.amount||'0')+' <span style="font-size:12px;color:#666">@'+escapeHtml(e.hotel)+'</span></div>').join('')||'<div style="color:#666">No expenses</div>';
+  }
+  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  sse.onmessage = (ev)=>{ try{ const msg = JSON.parse(ev.data); if(msg.type === 'init'){ (msg.snapshots||[]).forEach(p=>{ snapshots[p.id]=p }); document.getElementById('meta').textContent = 'Initialized ('+Object.keys(snapshots).length+' snapshots)'; } else if(msg.type === 'snapshot-create' || msg.type === 'snapshot-update'){ snapshots[msg.id] = msg.snapshot; document.getElementById('meta').textContent = 'Updated: '+new Date().toLocaleString(); } renderAll(); }catch(e){} };
+  sse.onerror = ()=>{ document.getElementById('meta').textContent = 'Disconnected - retrying'; };
+  </script></body></html>`;
   res.send(html);
 });
 
