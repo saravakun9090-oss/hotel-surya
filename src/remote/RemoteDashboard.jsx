@@ -18,6 +18,9 @@ try {
   console.warn('Firebase init failed in dashboard', e);
 }
 
+// NOTE: Owner password hard-coded here as requested. Change the value to your desired password.
+const OWNER_PASSWORD = 'ChangeMe123!';
+
 export default function RemoteDashboard() {
   const [authorized, setAuthorized] = useState(false);
   const [password, setPassword] = useState('');
@@ -47,8 +50,8 @@ export default function RemoteDashboard() {
   }, [authorized]);
 
   function tryAuth() {
-    const secret = process.env.REACT_APP_OWNER_PASSWORD || '';
-    if (password === secret && secret !== '') setAuthorized(true);
+  const secret = OWNER_PASSWORD || process.env.REACT_APP_OWNER_PASSWORD || '';
+  if (password === secret && secret !== '') setAuthorized(true);
     else alert('Invalid password');
   }
 
