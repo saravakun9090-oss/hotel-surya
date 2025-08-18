@@ -3,12 +3,10 @@ import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation 
 import { useSearchParams } from "react-router-dom";
 
 import { getBaseFolder, ensurePath, writeJSON, writeFile } from './utils/fsAccess';
-import * as cloudSync from './services/cloudSync';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
-import RemoteDashboard from './remote/RemoteDashboard';
 
 
 import {
@@ -81,7 +79,6 @@ const Sidebar = () => (
       <Link to="/storage">Storage</Link>
       <Link to="/accounts" className="btn">Accounts</Link>
       <Link to="/analysis">Analysis</Link>
-    <Link to="/owner">Owner (Live)</Link>
       
 
     </nav>
@@ -682,7 +679,6 @@ function CheckIn({ state, setState, locationState }) {
                     const updatedRent = { ...rentData, room: newRooms };
                     try {
                       await writeJSON(dateHandle, rentFileName, updatedRent);
-                      try { cloudSync.pushRent(updatedRent).catch(() => {}); } catch (e) {}
                     } catch (err) {
                       console.warn('Failed to update rent file', rentFileName, err);
                     }
@@ -1169,7 +1165,6 @@ function CheckIn({ state, setState, locationState }) {
   const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
   const roomsKey = roomsArr.join('_');
   await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
-  try { cloudSync.pushCheckin(guest).catch(() => {}); } catch (e) {}
 
     const year = String(now.getFullYear());
     const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
@@ -1889,8 +1884,7 @@ function CheckOut({ state, setState }) {
     const safeName = String(name).replace(/[^\w\-]+/g, "_");
     const roomsKey = rooms.join('_');
     const checkoutFileName = `checkout-${safeName}-${roomsKey}-${checkInDate}.json`;
-  await writeJSON(checkoutDir, checkoutFileName, data);
-  try { cloudSync.pushCheckout(data).catch(() => {}); } catch (e) {}
+    await writeJSON(checkoutDir, checkoutFileName, data);
 
     await checkinDir.removeEntry(fileName);
   }
@@ -2433,7 +2427,6 @@ async function persistReservation(res) {
     const safe = String(res.name).replace(/[^\w\-]+/g, '_'); // sanitize filename
     await writeJSON(dir, `reservation-${res.room}-${safe}.json`, res);
     console.log("Reservation saved to disk:", res);
-  try { cloudSync.pushReservation(res).catch(() => {}); } catch (e) {}
   } catch (err) {
     console.error("Failed to save reservation to disk:", err);
   }
@@ -3244,7 +3237,6 @@ const [expMsg, setExpMsg] = useState("");
       };
 
       await writeJSON(rentDir, fileName, rentData);
-  try { cloudSync.pushRent(rentData).catch(() => {}); } catch (e) {}
       // ✅ Refresh today's lists instantly
       await loadTodayData();
     } catch (err) {
@@ -3293,7 +3285,6 @@ const [expMsg, setExpMsg] = useState("");
     };
 
     await writeJSON(expDir, fileName, expenseData);
-  try { cloudSync.pushExpense(expenseData).catch(() => {}); } catch (e) {}
     // 🔹 Refresh today's lists instantly
     await loadTodayData();
     
@@ -3900,11 +3891,6 @@ export default function App() {
   const [state, setState] = useState(loadState());
   useEffect(() => { saveState(state); }, [state]);
 
-  // Push full app state to cloud so owner dashboard can show the full local state
-  useEffect(() => {
-    try { cloudSync.pushFullState(state).catch(() => {}); } catch (e) {}
-  }, [state]);
-
   useEffect(() => {
   (async () => {
     const base = await getBaseFolder();
@@ -3932,7 +3918,6 @@ export default function App() {
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
-            <Route path="/owner" element={<RemoteDashboard />} />
           </Routes>
         </div>
       </div>
