@@ -10,6 +10,7 @@ export default function SharedViewer() {
   const { id } = useParams();
   const query = useQuery();
   const token = query.get('k') || '';
+  const serverParam = query.get('server') || '';
   const navigate = useNavigate();
 
   const [state, setState] = useState({});
@@ -19,8 +20,9 @@ export default function SharedViewer() {
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    const server = (window.SHARE_SERVER_URL) || (window.SERVER_BASE) || 'http://localhost:4000';
-    const base = server.replace(/\/$/, '');
+  // allow passing server base in query (useful when SPA hosted elsewhere like Netlify)
+  const server = serverParam || (window.SHARE_SERVER_URL) || (window.SERVER_BASE) || 'http://localhost:4000';
+  const base = server.replace(/\/$/, '');
 
     // quick status check to detect invalid token early
     (async () => {
