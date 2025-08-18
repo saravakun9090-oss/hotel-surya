@@ -201,43 +201,6 @@ const checkInReservation = (res) => {
               </Link>
             ))}
           </div>
-            <div style={{ marginLeft: 12 }}>
-            <button className="btn" onClick={async ()=>{
-              try{
-                const existing = localStorage.getItem('mobile_public_link');
-                if(existing){ window.open(existing, '_blank'); return; }
-                // ensure share server is configured (try window.SHARE_SERVER_URL or ask the user)
-                let server = window?.SHARE_SERVER_URL || localStorage.getItem('share_server_url') || null;
-                if(!server) {
-                  const ask = prompt('Enter your share server URL (e.g. http://127.0.0.1:4000)');
-                  if(!ask) return alert('Share server required');
-                  server = ask.trim();
-                  localStorage.setItem('share_server_url', server);
-                }
-                // ensure netlify viewer base is configured (try window.NETLIFY_VIEWER_BASE or ask once)
-                let netlifyBase = window.NETLIFY_VIEWER_BASE || localStorage.getItem('netlify_viewer_base') || null;
-                if(!netlifyBase) {
-                  const askN = prompt('Enter your public viewer base (Netlify site URL) to produce non-localhost links (e.g. https://your-site.netlify.app)');
-                  if(askN) { netlifyBase = askN.trim(); localStorage.setItem('netlify_viewer_base', netlifyBase); }
-                }
-
-                // register with public:true and request netlify-based viewer URL
-                const body = { state, public: true };
-                if(netlifyBase) body.netlifyBase = netlifyBase;
-                const resp = await fetch(server.replace(/\/$/, '') + '/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-                if(!resp.ok) throw new Error('register failed '+resp.status);
-                const data = await resp.json();
-                // prefer Netlify-hosted viewer if server returned it
-                let pub = data.netlifyUrl || data.publicUrl || (data.advertisedBase ? (data.advertisedBase.replace(/\/$/, '') + '/m/' + data.id) : null);
-                if(!pub) {
-                  if (server) pub = server.replace(/\/$/, '') + '/m/' + (data.id || '');
-                  else throw new Error('No share server configured');
-                }
-                localStorage.setItem('mobile_public_link', pub);
-                window.open(pub, '_blank');
-              }catch(e){ alert('Failed to open mobile view: '+String(e?.message||e)); }
-            }}>Open Live Mobile</button>
-          </div>
         </div>
       </div>
 
@@ -3930,30 +3893,7 @@ export default function App() {
   const [state, setState] = useState(loadState());
   useEffect(() => { saveState(state); }, [state]);
 
-  // push state updates to share server if a permanent id is registered
-  useEffect(() => {
-    let timer = null;
-    const id = localStorage.getItem('mobile_share_id');
-  const token = localStorage.getItem('mobile_share_token');
-    if (!id) return;
-    const push = async () => {
-      try {
-        const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
-    const url = `${server.replace(/\/$/, '')}/update/${id}` + (token ? ('?k=' + encodeURIComponent(token)) : '');
-    // include recent rents/expenses/reservations if available on window to enrich snapshot
-    const payload = { state };
-    if (window.__MOBILE_SHARE_EXTRA__) {
-      try { Object.assign(payload, window.__MOBILE_SHARE_EXTRA__); } catch(e) { }
-    }
-    await fetch(url, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-      } catch (err) { /* ignore */ }
-    };
-    // debounce updates to once per 800ms
-    timer = setTimeout(push, 800);
-    return () => { if (timer) clearTimeout(timer); };
-  }, [state]);
+  // (mobile share feature removed) previously we pushed state to a local share server when a permanent id was registered.
 
   useEffect(() => {
   (async () => {
