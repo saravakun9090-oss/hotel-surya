@@ -11,5 +11,5 @@ port: 3000, // or your port
 allowedHosts: true, // allow all external hosts (ngrok, etc.)
 strictPort: false, // optional
 },
-base: './',
+base: '/',
 });
