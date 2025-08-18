@@ -115,47 +115,7 @@ export default function LiveUpdates() {
   // Save remote URL to localStorage when changed
   useEffect(() => { localStorage.setItem('live_sync_url', remoteUrl || ''); }, [remoteUrl]);
 
-  // Manual test and push helpers exposed to UI
-  const testRemoteNow = async () => {
-    if (!remoteUrl) return alert('Enter a remote JSON URL first');
-    try {
-      setSyncStatus('testing');
-      const r = await fetch(remoteUrl, { method: 'GET', cache: 'no-store' });
-      if (!r.ok) { setSyncStatus('error'); return alert('Remote test failed: ' + r.status); }
-      const d = await r.json();
-      alert('Remote reachable.');
-      setSyncStatus('ok');
-      // if remote has state, offer to load it
-      const remoteState = d && d.state ? d.state : d;
-      if (confirm('Load remote state into this browser? This will overwrite local view.')) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState));
-        setAppState(remoteState);
-      }
-    } catch (err) {
-      console.warn('Test remote failed', err);
-      setSyncStatus('error');
-      alert('Remote test failed: ' + (err?.message || String(err)));
-    }
-  };
-
-  const pushNow = async () => {
-    if (!remoteUrl) return alert('Enter a remote JSON URL first');
-    try {
-      setSyncStatus('syncing');
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = safeParse(raw) || {};
-      const payload = { state: parsed, lastUpdated: Date.now(), source: clientIdRef.current };
-      const res = await fetch(remoteUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!res.ok) { setSyncStatus('error'); return alert('Push failed: ' + res.status); }
-      localStorage.setItem('live_remote_last', String(payload.lastUpdated));
-      setSyncStatus('ok');
-      alert('Pushed successfully');
-    } catch (err) {
-      console.warn('Push failed', err);
-      setSyncStatus('error');
-      alert('Push failed: ' + (err?.message || String(err)));
-    }
-  };
+  // remote manual controls removed: LiveUpdates is read-only UI. Background sync remains if a remote URL is configured in localStorage.
 
   // try to read today rents & expenses from connected storage (File System API)
   useEffect(() => {
@@ -226,14 +186,9 @@ export default function LiveUpdates() {
           <div className="title">Live Updates</div>
           <div style={{ color: 'var(--muted)', marginTop: 6 }}>Live view of rooms, reservations, and today's collections</div>
         </div>
-        <div style={{ minWidth: 360 }}>
-          <div className="card" style={{ padding: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input placeholder="Remote JSON URL (PUT/GET)" value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} style={{ flex: 1 }} />
-            <button className="btn" onClick={testRemoteNow}>Test</button>
-            <button className="btn primary" onClick={pushNow}>Push Now</button>
-          </div>
-          <div style={{ marginTop: 6, fontSize: 12, color: syncStatus === 'error' ? '#b91c1c' : syncStatus === 'ok' ? '#16a34a' : '#6b7280' }}>
-            Sync: {syncStatus} {remoteUrl ? `(endpoint set)` : `(no endpoint)`}
+        <div>
+          <div style={{ fontSize: 12, color: syncStatus === 'error' ? '#b91c1c' : syncStatus === 'ok' ? '#16a34a' : '#6b7280' }}>
+            Live: {syncStatus}{remoteUrl ? ' (remote enabled)' : ''}
           </div>
         </div>
       </div>
