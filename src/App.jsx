@@ -3930,6 +3930,8 @@ export default function App() {
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
+            {/* Public short links like /1214 — placed last so they don't shadow other routes */}
+            <Route path="/:publicId" element={<PublicLive />} />
           </Routes>
         </div>
       </div>

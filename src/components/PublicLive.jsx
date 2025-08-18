@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { ymd } from '../utils/dateUtils';
 
 const STORAGE_KEY = 'hotel_demo_v2';
@@ -6,6 +7,8 @@ const STORAGE_KEY = 'hotel_demo_v2';
 function safeParse(raw) { try { return JSON.parse(raw); } catch { return null; } }
 
 export default function PublicLive({ id }) {
+  const params = useParams();
+  const publicId = id || params.publicId || params.id;
   const [remoteUrl, setRemoteUrl] = useState(null);
   const [state, setState] = useState(() => safeParse(localStorage.getItem(STORAGE_KEY)) || { floors: {}, reservations: [] });
   const mounted = useRef(true);
@@ -19,12 +22,12 @@ export default function PublicLive({ id }) {
         const mapResp = await fetch('/live-mappings.json', { cache: 'no-store' }).catch(() => null);
         if (mapResp && mapResp.ok) {
           const mapping = await mapResp.json().catch(() => null);
-          if (mapping && mapping[id]) { setRemoteUrl(mapping[id]); return; }
+          if (mapping && mapping[publicId]) { setRemoteUrl(mapping[publicId]); return; }
         }
 
         // fallback to localStorage mapping key
-        const ls = localStorage.getItem('live_public_url_' + id);
-        if (ls) { setRemoteUrl(ls); return; }
+  const ls = localStorage.getItem('live_public_url_' + publicId);
+  if (ls) { setRemoteUrl(ls); return; }
 
         // nothing found
         setRemoteUrl(null);
