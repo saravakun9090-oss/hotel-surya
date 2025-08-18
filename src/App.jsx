@@ -7,7 +7,7 @@ import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
-import MobileView from './components/MobileView';
+// MobileView replaced by server-hosted public mobile viewer (/m/:id)
 import SharedViewer from './components/SharedViewer';
 
 
@@ -80,8 +80,7 @@ const Sidebar = () => (
       <Link to="/floors">Floors</Link>
       <Link to="/storage">Storage</Link>
       <Link to="/accounts" className="btn">Accounts</Link>
-      <Link to="/analysis">Analysis</Link>
-  <Link to="/mobile">Mobile View</Link>
+  <Link to="/analysis">Analysis</Link>
       
 
     </nav>
@@ -201,6 +200,21 @@ const checkInReservation = (res) => {
                 Floor {f}
               </Link>
             ))}
+          </div>
+          <div style={{ marginLeft: 12 }}>
+            <button className="btn" onClick={async ()=>{
+              try{
+                const existing = localStorage.getItem('mobile_public_link');
+                if(existing){ window.open(existing, '_blank'); return; }
+                const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+                const resp = await fetch(server.replace(/\/$/, '') + '/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ state, public: true }) });
+                if(!resp.ok) throw new Error('register failed '+resp.status);
+                const data = await resp.json();
+                const pub = data.publicUrl || (server.replace(/\/$/, '') + '/m/' + (data.id || ''));
+                localStorage.setItem('mobile_public_link', pub);
+                window.open(pub, '_blank');
+              }catch(e){ alert('Failed to open mobile view: '+String(e?.message||e)); }
+            }}>Open Live Mobile</button>
           </div>
         </div>
       </div>
@@ -3943,7 +3957,7 @@ export default function App() {
             <Route path="/storage" element={<StorageSetup setState={setState} state={state} />} />
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
-      <Route path="/mobile" element={<MobileView state={state} />} />
+  {/* legacy mobile route removed; use "Open Live Mobile" button on Dashboard */}
       <Route path="/s/:id" element={<SharedViewer />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
