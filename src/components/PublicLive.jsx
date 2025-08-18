@@ -29,6 +29,16 @@ export default function PublicLive({ id }) {
   const ls = localStorage.getItem('live_public_url_' + publicId);
   if (ls) { setRemoteUrl(ls); return; }
 
+        // nothing found in mapping — try to see if the same host provides /m/:id (public mobile viewer) or /s/:id
+        try {
+          const tryHost = window.location.origin.replace(/\/$/, '');
+          // prefer mobile public endpoint
+          const mUrl = tryHost + '/m/' + encodeURIComponent(publicId);
+          const mR = await fetch(mUrl, { method: 'GET', cache: 'no-store' }).catch(() => null);
+          if (mR && mR.ok) { setRemoteUrl(mUrl); return; }
+          // try snapshot JSON at /s/:id (server viewer not JSON but we can try /sse via SSE below); set remoteUrl to null and let SSE/poll fallback later
+        } catch (e) { }
+
         // nothing found
         setRemoteUrl(null);
       } catch (err) {
@@ -41,23 +51,43 @@ export default function PublicLive({ id }) {
 
   // Poll remote URL for state
   useEffect(() => {
-    if (!remoteUrl) return;
     let running = true;
-    const poll = async () => {
-      try {
-        const r = await fetch(remoteUrl, { cache: 'no-store' });
-        if (!r.ok) return;
-        const data = await r.json();
-        const remoteState = data && data.state ? data.state : data;
-        if (!running) return;
-        if (remoteState) {
-          setState(remoteState);
-        }
-      } catch (err) { /* ignore network errors */ }
-    };
-    poll();
-    const iv = setInterval(poll, 2000);
-    return () => { running = false; clearInterval(iv); };
+    // If remoteUrl is an SSE page (same-origin /m/:id served HTML), we still try polling for JSON if available.
+    if (remoteUrl) {
+      const poll = async () => {
+        try {
+          const r = await fetch(remoteUrl, { cache: 'no-store' });
+          if (!r.ok) return;
+          // try to parse JSON; if HTML, this will fail and we ignore
+          const data = await r.json().catch(() => null);
+          const remoteState = data && data.state ? data.state : data;
+          if (!running) return;
+          if (remoteState) setState(remoteState);
+        } catch (err) { /* ignore network errors */ }
+      };
+      poll();
+      const iv = setInterval(poll, 2000);
+      return () => { running = false; clearInterval(iv); };
+    }
+
+    // If no remote URL, attempt to open SSE to the same-origin share server (/sse/:id)
+    try {
+      const sseUrl = window.location.origin.replace(/\/$/, '') + '/sse/' + encodeURIComponent(publicId);
+      const es = new EventSource(sseUrl);
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'init' || msg.type === 'update') {
+            const remoteState = msg.state || {};
+            setState(remoteState);
+          }
+        } catch (e) {}
+      };
+      es.onerror = () => { /* ignore - SSE may be blocked for non-server hosts */ };
+      return () => { try { es.close(); } catch (e) {} };
+    } catch (e) {
+      // SSE failed, nothing more to do
+    }
   }, [remoteUrl]);
 
   // derive counts

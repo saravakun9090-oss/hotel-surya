@@ -17,6 +17,11 @@ export default function LiveUpdates() {
   // Remote sync URL (user-provided). Stored in localStorage under 'live_sync_url'
   const [remoteUrl, setRemoteUrl] = useState(() => localStorage.getItem('live_sync_url') || '');
   const [syncStatus, setSyncStatus] = useState('idle');
+  // share server (defaults to local dev server) and share info persisted
+  const [shareServer, setShareServer] = useState(() => localStorage.getItem('share_server') || 'http://localhost:4000');
+  const [isPublicShare, setIsPublicShare] = useState(() => (localStorage.getItem('live_share_public') === '1'));
+  const [shareInfo, setShareInfo] = useState(() => safeParse(localStorage.getItem('live_share_info')) || null);
+  const sseRef = useRef(null);
   const clientIdRef = useRef(localStorage.getItem('live_client_id') || Math.random().toString(36).slice(2));
   useEffect(() => { localStorage.setItem('live_client_id', clientIdRef.current); }, []);
 
@@ -115,6 +120,11 @@ export default function LiveUpdates() {
   // Save remote URL to localStorage when changed
   useEffect(() => { localStorage.setItem('live_sync_url', remoteUrl || ''); }, [remoteUrl]);
 
+  // persist share server settings
+  useEffect(() => { localStorage.setItem('share_server', shareServer || ''); }, [shareServer]);
+  useEffect(() => { localStorage.setItem('live_share_public', isPublicShare ? '1' : '0'); }, [isPublicShare]);
+  useEffect(() => { localStorage.setItem('live_share_info', JSON.stringify(shareInfo || {})); }, [shareInfo]);
+
   // Manual test and push helpers exposed to UI
   const testRemoteNow = async () => {
     if (!remoteUrl) return alert('Enter a remote JSON URL first');
@@ -139,15 +149,28 @@ export default function LiveUpdates() {
   };
 
   const pushNow = async () => {
-    if (!remoteUrl) return alert('Enter a remote JSON URL first');
+    // If shareInfo exists, push to share-server update endpoint; otherwise fallback to arbitrary remoteUrl
     try {
       setSyncStatus('syncing');
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = safeParse(raw) || {};
-      const payload = { state: parsed, lastUpdated: Date.now(), source: clientIdRef.current };
-      const res = await fetch(remoteUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const payload = { state: parsed, rents: parsed.rents || [], expenses: parsed.expenses || [], reservations: parsed.reservations || [] };
+
+      if (shareInfo && shareInfo.id) {
+        const url = shareServer.replace(/\/$/, '') + '/update/' + encodeURIComponent(shareInfo.id) + (shareInfo.token ? ('?k=' + encodeURIComponent(shareInfo.token)) : '');
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) { setSyncStatus('error'); return alert('Push failed: ' + res.status); }
+        setSyncStatus('ok');
+        alert('Pushed successfully to share server');
+        localStorage.setItem('live_remote_last', String(Date.now()));
+        return;
+      }
+
+      if (!remoteUrl) return alert('Enter a remote JSON URL first');
+      const putPayload = { state: parsed, lastUpdated: Date.now(), source: clientIdRef.current };
+      const res = await fetch(remoteUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(putPayload) });
       if (!res.ok) { setSyncStatus('error'); return alert('Push failed: ' + res.status); }
-      localStorage.setItem('live_remote_last', String(payload.lastUpdated));
+      localStorage.setItem('live_remote_last', String(putPayload.lastUpdated));
       setSyncStatus('ok');
       alert('Pushed successfully');
     } catch (err) {
@@ -155,6 +178,56 @@ export default function LiveUpdates() {
       setSyncStatus('error');
       alert('Push failed: ' + (err?.message || String(err)));
     }
+  };
+
+  // Register a new share on the share server. Server returns id, token, publicUrl/netlifyUrl
+  const registerRemoteShare = async (makePublic = false) => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = safeParse(raw) || {};
+      setSyncStatus('registering');
+      const body = { public: !!makePublic, state: parsed };
+      const url = shareServer.replace(/\/$/, '') + '/register';
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) { setSyncStatus('error'); return alert('Register failed: ' + res.status); }
+      const data = await res.json().catch(() => null);
+      if (!data || !data.id) { setSyncStatus('error'); return alert('Register failed: invalid response'); }
+      setShareInfo({ id: data.id, token: data.token, publicUrl: data.publicUrl || data.netlifyUrl || null });
+      setSyncStatus('ok');
+      alert('Share created. ID: ' + data.id + (data.token ? (' (token present)') : '') + (data.publicUrl ? '\nPublic URL: ' + data.publicUrl : ''));
+    } catch (err) {
+      console.warn('Register failed', err);
+      setSyncStatus('error');
+      alert('Register failed: ' + (err?.message || String(err)));
+    }
+  };
+
+  // Start SSE connection to the share server to receive live updates for the created share
+  const startShareSSE = () => {
+    try {
+      if (!shareInfo || !shareInfo.id) return alert('No share created yet');
+      const base = shareServer.replace(/\/$/, '');
+      const sseUrl = base + '/sse/' + encodeURIComponent(shareInfo.id) + (shareInfo.token ? ('?k=' + encodeURIComponent(shareInfo.token)) : '');
+      if (sseRef.current) {
+        try { sseRef.current.close(); } catch (e) {}
+        sseRef.current = null;
+      }
+      const es = new EventSource(sseUrl);
+      sseRef.current = es;
+      es.onopen = () => setSyncStatus('sse-open');
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'init' || msg.type === 'update') {
+            const remoteState = msg.state || {};
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState));
+            setAppState(remoteState);
+          }
+        } catch (e) { }
+      };
+      es.onerror = () => setSyncStatus('sse-error');
+      alert('SSE started (listening for server updates)');
+    } catch (err) { console.warn(err); alert('Could not start SSE: ' + String(err)); }
   };
 
   // try to read today rents & expenses from connected storage (File System API)
@@ -252,6 +325,26 @@ export default function LiveUpdates() {
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: syncStatus === 'error' ? '#b91c1c' : syncStatus === 'ok' ? '#16a34a' : '#6b7280' }}>
             Sync: {syncStatus} {remoteUrl ? `(endpoint set)` : `(no endpoint)`}
+          </div>
+          <div className="card" style={{ padding: 8, marginTop: 8 }}>
+            <div style={{ fontSize: 13, marginBottom: 8, fontWeight: 700 }}>Share server (for public short-links)</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input placeholder="Share server base (http://host:port)" value={shareServer} onChange={(e) => setShareServer(e.target.value)} style={{ flex: 1 }} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={isPublicShare} onChange={(e) => setIsPublicShare(e.target.checked)} /> Public</label>
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={() => registerRemoteShare(isPublicShare)}>Create Share</button>
+              <button className="btn" onClick={startShareSSE}>Listen (SSE)</button>
+              <button className="btn" onClick={() => { setShareInfo(null); localStorage.removeItem('live_share_info'); alert('Cleared share info'); }}>Clear</button>
+            </div>
+            {shareInfo && (
+              <div style={{ marginTop: 8, fontSize: 13 }}>
+                <div><strong>ID:</strong> {shareInfo.id}</div>
+                {shareInfo.token && <div><strong>Token:</strong> {shareInfo.token}</div>}
+                {shareInfo.publicUrl && <div style={{ marginTop: 6 }}><a href={shareInfo.publicUrl} target="_blank" rel="noreferrer">Open public URL</a></div>}
+                <div style={{ marginTop: 6 }}><small style={{ color: 'var(--muted)' }}>You can copy this ID and add it to public/live-mappings.json or use the server's public URL.</small></div>
+              </div>
+            )}
           </div>
         </div>
       </div>
