@@ -18,6 +18,7 @@ export default function MobileView({ state }) {
   const [shareError, setShareError] = useState('');
   const [permanentId, setPermanentId] = useState(() => localStorage.getItem('mobile_share_id') || '');
   const [shareToken, setShareToken] = useState(() => localStorage.getItem('mobile_share_token') || '');
+  const [netlifyLink, setNetlifyLink] = useState('');
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   // per-section searches / filters
@@ -168,6 +169,17 @@ export default function MobileView({ state }) {
         setShareToken(data.token);
         localStorage.setItem('mobile_share_token', data.token);
       }
+      // build a Netlify-friendly viewer link (so static SPA on Netlify can point to this share server)
+      try {
+        const serverBase = server.replace(/\/$/, '');
+        const netlifyBase = (window?.NETLIFY_VIEWER_BASE) || 'https://celebrated-trifle-323479.netlify.app';
+        if (data.id) {
+          const kPart = data.token ? ('?k=' + encodeURIComponent(data.token)) : '';
+          const serverParam = data.token ? ('&server=' + encodeURIComponent(serverBase)) : ('?server=' + encodeURIComponent(serverBase));
+          const nl = netlifyBase.replace(/\/$/, '') + '/s/' + data.id + kPart + serverParam;
+          setNetlifyLink(nl);
+        }
+      } catch (e) { /* ignore */ }
     } catch (err) {
       console.warn('Share failed', err);
       setShareError(String(err?.message || err));
@@ -284,6 +296,16 @@ export default function MobileView({ state }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ fontSize: 12, color: sseConnected ? 'green' : 'orange' }}>{sseConnected ? 'Live' : 'Disconnected'}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{lastUpdated ? new Date(lastUpdated).toLocaleString() : ''}</div>
+          </div>
+        </div>
+      )}
+
+      {netlifyLink && (
+        <div className="card" style={{ padding: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{netlifyLink}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a className="btn" href={netlifyLink} target="_blank" rel="noreferrer">Open Netlify Viewer</a>
+            <button className="btn" onClick={() => { try { navigator.clipboard.writeText(netlifyLink); } catch (e) {} }}>Copy</button>
           </div>
         </div>
       )}
