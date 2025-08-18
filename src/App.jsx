@@ -3900,6 +3900,11 @@ export default function App() {
   const [state, setState] = useState(loadState());
   useEffect(() => { saveState(state); }, [state]);
 
+  // Push full app state to cloud so owner dashboard can show the full local state
+  useEffect(() => {
+    try { cloudSync.pushFullState(state).catch(() => {}); } catch (e) {}
+  }, [state]);
+
   useEffect(() => {
   (async () => {
     const base = await getBaseFolder();

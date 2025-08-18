@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getFirestore, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { initializeApp } from 'firebase/app';
 import * as cloudSync from '../services/cloudSync';
+import { doc, onSnapshot as onDocSnapshot } from 'firebase/firestore';
 
 // Simple owner-only dashboard that requires a shared password set via env var REACT_APP_OWNER_PASSWORD
 // It reads Firestore collections: checkins, checkouts, reservations, rents, expenses
@@ -30,6 +31,7 @@ export default function RemoteDashboard() {
   const [reservations, setReservations] = useState([]);
   const [rents, setRents] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [fullState, setFullState] = useState(null);
 
   useEffect(() => {
     if (!authorized || !db) return;
@@ -46,6 +48,13 @@ export default function RemoteDashboard() {
     try { const q3 = query(collection(db, 'reservations'), orderBy('createdAt', 'desc')); unsub.push(onSnapshot(q3, snap => setReservations(snap.docs.map(d => ({ id: d.id, ...d.data() })) ))); } catch (e) { console.warn(e); }
     try { const q4 = query(collection(db, 'rents'), orderBy('createdAt', 'desc')); unsub.push(onSnapshot(q4, snap => setRents(snap.docs.map(d => ({ id: d.id, ...d.data() })) ))); } catch (e) { console.warn(e); }
     try { const q5 = query(collection(db, 'expenses'), orderBy('createdAt', 'desc')); unsub.push(onSnapshot(q5, snap => setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() })) ))); } catch (e) { console.warn(e); }
+
+    // Listen to full state doc as well
+    try {
+      const sdoc = doc(db, 'meta', 'latestState');
+      const u = onDocSnapshot(sdoc, snap => { if (snap.exists()) setFullState(snap.data().state || null); });
+      unsub.push(u);
+    } catch (e) { /* ignore */ }
 
     return () => unsub.forEach(u => typeof u === 'function' && u());
   }, [authorized]);
@@ -85,6 +94,13 @@ export default function RemoteDashboard() {
         )}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      {fullState && (
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h3>Full Local State (synced)</h3>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Rooms floors: {Object.keys(fullState.floors || {}).length}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Guests: {(fullState.guests || []).length}</div>
+        </div>
+      )}
         <div className="card">
           <h3>Recent Check-ins</h3>
           {checkins.length === 0 && <div style={{ color: 'var(--muted)' }}>No check-ins</div>}

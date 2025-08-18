@@ -71,4 +71,11 @@ export async function pushExpense(expense) {
   } catch (e) { console.warn(e); }
 }
 
-export default { pushCheckin, pushCheckout, pushReservation, pushRent, pushExpense };
+export async function pushFullState(state) {
+  try {
+    // store the full app state under a known doc so dashboard can read it
+    await safeSet('meta', 'latestState', { state });
+  } catch (e) { console.warn('pushFullState failed', e); }
+}
+
+export default { pushCheckin, pushCheckout, pushReservation, pushRent, pushExpense, pushFullState };
