@@ -147,20 +147,43 @@ const RoomCard = ({ room, onClick }) => (
 function LiveSharePanel({ shareInfo, setShareInfo, sharing, setSharing, shareStatus, setShareStatus, state }) {
   const [server, setServer] = useState((shareInfo && shareInfo.server) || 'http://localhost:4000');
   const [isPublic, setIsPublic] = useState(Boolean(shareInfo && shareInfo.public));
-  const [netlifyBase, setNetlifyBase] = useState('');
+  const [netlifyBase, setNetlifyBase] = useState((shareInfo && shareInfo.netlifyBase) || '');
+  const [lastError, setLastError] = useState(null);
+
+  const testServer = async () => {
+    try {
+      setShareStatus('Checking server...');
+      const health = await fetch(String(server).replace(/\/$/, '') + '/health', { cache: 'no-store' });
+      if (!health.ok) throw new Error('health check failed: ' + health.status);
+      const j = await health.json().catch(() => null);
+      setShareStatus('Server OK');
+      setLastError(null);
+      return true;
+    } catch (err) {
+      console.warn('Server health check failed', err);
+      setLastError(err?.message || String(err));
+      setShareStatus('Server unreachable');
+      return false;
+    }
+  };
 
   const startShare = async () => {
+    setLastError(null);
+    if (!(await testServer())) return;
     try {
       setShareStatus('Registering...');
       const res = await registerShareOnServer(server, state, isPublic, netlifyBase || null);
-      const info = { server, id: res.id, token: res.token, public: !!res.public, url: res.netlifyUrl || res.publicUrl || (res.advertisedBase ? (res.advertisedBase + '/m/' + res.id) : null) };
+      const info = { server, id: res.id, token: res.token, public: !!res.public, url: res.netlifyUrl || res.publicUrl || (res.advertisedBase ? (res.advertisedBase + '/m/' + res.id) : null), netlifyBase };
       setShareInfo(info);
       saveShareInfo(info);
       setSharing(true);
       setShareStatus('Live');
+      setLastError(null);
     } catch (err) {
       console.error('Register failed', err);
-      setShareStatus('Failed to register');
+      const msg = (err && err.message) ? err.message : String(err);
+      setLastError(msg);
+      setShareStatus('Register failed');
     }
   };
 
@@ -169,15 +192,47 @@ function LiveSharePanel({ shareInfo, setShareInfo, sharing, setSharing, shareSta
     setShareStatus('Stopped');
   };
 
+  const copyLink = async () => {
+    try {
+      if (shareInfo && shareInfo.url) {
+        await navigator.clipboard.writeText(shareInfo.url);
+        setShareStatus('Link copied');
+        setTimeout(() => setShareStatus('Live'), 1200);
+      }
+    } catch (e) {
+      console.warn('Copy failed', e);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--muted)' }} title="Live share status">{shareStatus || 'Not sharing'}</div>
-      {sharing && shareInfo && shareInfo.url ? (
-        <a href={shareInfo.url} target="_blank" rel="noreferrer" className="pill" style={{ background: 'var(--deep)', color: 'var(--cream)' }}>{new URL(shareInfo.url).host}</a>
-      ) : (
-        <button className="pill" onClick={startShare}>Start Live</button>
-      )}
-      {sharing && <button className="pill" onClick={stopShare}>Stop</button>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input value={server} onChange={(e) => setServer(e.target.value)} style={{ width: 220, padding: '6px 8px', borderRadius: 6, border: '1px solid #ddd' }} />
+          <button className="btn" onClick={testServer} style={{ padding: '6px 8px' }}>Test</button>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Public</label>
+          <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
+          <input placeholder="(optional) Netlify base" value={netlifyBase} onChange={(e)=>setNetlifyBase(e.target.value)} style={{ width: 200, padding: '6px 8px', borderRadius: 6, border: '1px solid #eee' }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {!sharing ? (
+          <button className="pill" onClick={startShare}>Start Live</button>
+        ) : (
+          <>
+            {shareInfo && shareInfo.url && (
+              <a href={shareInfo.url} target="_blank" rel="noreferrer" className="pill" style={{ background: 'var(--deep)', color: 'var(--cream)' }}>{new URL(shareInfo.url).host}</a>
+            )}
+            <button className="pill" onClick={copyLink}>Copy Link</button>
+            <button className="pill" onClick={stopShare}>Stop</button>
+          </>
+        )}
+      </div>
+
+      <div style={{ fontSize: 12, color: lastError ? '#c91818' : 'var(--muted)' }}>{lastError || shareStatus || 'Not sharing'}</div>
     </div>
   );
 }
