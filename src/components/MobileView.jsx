@@ -19,6 +19,7 @@ export default function MobileView({ state }) {
   const [permanentId, setPermanentId] = useState(() => localStorage.getItem('mobile_share_id') || '');
   const [shareToken, setShareToken] = useState(() => localStorage.getItem('mobile_share_token') || '');
   const [netlifyLink, setNetlifyLink] = useState('');
+  const [publicLink, setPublicLink] = useState('');
   const [sseConnected, setSseConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
   // per-section searches / filters
@@ -164,6 +165,8 @@ export default function MobileView({ state }) {
       if (data.id) {
         setPermanentId(data.id);
         localStorage.setItem('mobile_share_id', data.id);
+  // public permanent link (no token)
+  try { setPublicLink(((window?.SHARE_SERVER_URL) || 'http://localhost:4000').replace(/\/$/, '') + '/m/' + data.id); } catch (e) {}
       }
       if (data.token) {
         setShareToken(data.token);
@@ -299,6 +302,16 @@ export default function MobileView({ state }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ fontSize: 12, color: sseConnected ? 'green' : 'orange' }}>{sseConnected ? 'Live' : 'Disconnected'}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{lastUpdated ? new Date(lastUpdated).toLocaleString() : ''}</div>
+          </div>
+        </div>
+      )}
+
+      {publicLink && (
+        <div className="card" style={{ padding: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{publicLink}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a className="btn" href={publicLink} target="_blank" rel="noreferrer">Open Public View</a>
+            <button className="btn" onClick={() => { try { navigator.clipboard.writeText(publicLink); } catch (e) {} }}>Copy</button>
           </div>
         </div>
       )}

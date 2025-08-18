@@ -406,6 +406,93 @@ app.get('/s/:id', (req, res) => {
   res.send(html);
 });
 
+// Public mobile-friendly viewer (no token required) - intended for sharing to phones/devices
+app.get('/m/:id', (req, res) => {
+  const id = req.params.id;
+  const file = path.join(STORE_DIR, id + '.json');
+  if (!fs.existsSync(file)) return res.status(404).send('Not found');
+  const serverBase = `${req.protocol}://${req.get('host')}`;
+  // Serve a streamlined mobile-first viewer; same content as /s/:id but without token validation
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mobile View ${id}</title>
+  <style>
+    :root{--bg:#f6f6f6;--card:#fff;--muted:#666}
+    html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#111}
+    .wrap{padding:10px}
+    header{display:flex;align-items:center;justify-content:space-between}
+    h1{font-size:16px;margin:0}
+    .rooms{display:flex;flex-direction:column;gap:8px}
+    .room-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .room{height:56px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff}
+    .free{background:#e9ecef;color:#222}
+    .occupied{background:#2e8b57}
+    .reserved{background:#ff8c00}
+    .card{background:var(--card);padding:10px;border-radius:8px;margin-bottom:8px}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .row{display:flex;justify-content:space-between;align-items:center}
+    .controls{display:flex;gap:8px;margin-bottom:8px}
+    @media(min-width:700px){ .mobile-only{display:none} }
+  </style>
+  </head><body>
+  <div class="wrap">
+    <header>
+      <div><h1>Hotel Surya — Mobile View</h1><div style="font-size:12px;color:var(--muted)">Permanent public view</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="openPage('reservations')">Reservations</button>
+        <button onclick="openPage('checkouts')">Checkouts</button>
+        <button onclick="openPage('rents')">Rents</button>
+        <button onclick="openPage('expenses')">Expenses</button>
+      </div>
+    </header>
+
+    <div class="card">
+      <strong>Rooms</strong>
+      <div id="rooms" class="rooms">Loading...</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><strong>Current Guests</strong><div id="guest-count" style="font-size:12px;color:var(--muted)"></div></div>
+      <div class="controls"><input id="guest-search" placeholder="Search guests..." /></div>
+      <div id="guest-list" class="list">Loading...</div>
+    </div>
+
+    <div id="page-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:80;padding:12px;box-sizing:border-box">
+      <div style="max-width:920px;margin:0 auto;background:var(--card);border-radius:8px;padding:12px;position:relative;height:90vh;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong id="page-title">Details</strong><button onclick="closePage()">Close</button></div>
+        <div id="page-checkouts" style="display:none"></div>
+        <div id="page-reservations" style="display:none"></div>
+        <div id="page-rents" style="display:none"></div>
+        <div id="page-expenses" style="display:none"></div>
+      </div>
+    </div>
+
+  <script>
+    const SERVER_BASE = ${JSON.stringify(serverBase)};
+    const id = ${JSON.stringify(id)};
+    let state = {};
+    function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function renderRooms(){ const roomsEl = document.getElementById('rooms'); const floors = state.floors||{}; const keys = Object.keys(floors).sort((a,b)=>Number(a)-Number(b)); if(!keys.length){ roomsEl.innerHTML='<div style="color:var(--muted)">No rooms</div>'; return };
+      const today = new Date().toISOString().slice(0,10); const reservedSet = new Set((state.reservations||[]).filter(r=>String(r.date||'').slice(0,10)===today).map(r=>Number(r.room)));
+      roomsEl.innerHTML = keys.map(f=> '<div style="margin-bottom:8px"><div style="font-weight:700">Floor '+f+'</div><div class="room-grid">'+ (floors[f]||[]).map(r=>{ let cls = (r.status||'free')==='occupied'?'occupied':((r.status||'free')==='reserved'?'reserved':'free'); if((!r.status||r.status==='free') && reservedSet.has(Number(r.number))) cls='reserved'; return '<div class="room '+cls+'">'+escapeHtml(r.number)+'</div>' }).join('') +'</div></div>').join(''); }
+    function buildGuestList(){ const out=[]; for(const fa of Object.values(state.floors||{})){ for(const r of fa){ if(r.status==='occupied' && r.guest) out.push({name:r.guest.name, contact:r.guest.contact, room:r.number, checkIn:r.guest.checkIn||r.guest.checkInDate||''}); } } return out; }
+    function renderGuests(){ const g = buildGuestList(); document.getElementById('guest-count').textContent = g.length? g.length+' guests':''; const q=(document.getElementById('guest-search').value||'').toLowerCase().trim(); const out = g.filter(x=>!q||Object.values(x).some(v=>String(v||'').toLowerCase().includes(q))).map(x=>'<div class="row"><div><div style="font-weight:700">'+escapeHtml(x.name)+'</div><div style="font-size:12px;color:var(--muted)">Room '+escapeHtml(x.room)+' — '+escapeHtml(x.contact||'')+'</div></div><div><button onclick="openId(\''+encodeURIComponent(x.name)+'\')">Open ID</button></div></div>').join('')||'<div style="color:var(--muted)">No guests</div>'; document.getElementById('guest-list').innerHTML = out; }
+    function openId(name){ try{ window.open('/','_blank'); }catch(e){} }
+    function renderAll(){ renderRooms(); renderGuests(); }
+    document.getElementById('guest-search').addEventListener('input', ()=>renderGuests());
+
+    const evt = new EventSource(SERVER_BASE + '/sse/' + id);
+    evt.onmessage = (ev)=>{ try{ const msg=JSON.parse(ev.data); if(msg.type==='init' || msg.type==='update'){ state = msg.state||{}; if(msg.rents) state.rents=msg.rents; if(msg.expenses) state.expenses=msg.expenses; if(msg.reservations) state.reservations=msg.reservations; } renderAll(); }catch(e){} };
+    evt.onerror = ()=>{};
+    function openPage(which){ document.getElementById('page-overlay').style.display='block'; document.getElementById('page-title').textContent = which; ['checkouts','reservations','rents','expenses'].forEach(k=>{ const el=document.getElementById('page-'+k); el.style.display = (k===which)?'block':'none'; }); if(which==='checkouts') renderPageCheckouts(); if(which==='reservations') renderPageReservations(); if(which==='rents') renderPageRents(); if(which==='expenses') renderPageExpenses(); }
+    function closePage(){ document.getElementById('page-overlay').style.display='none'; }
+    function renderPageCheckouts(){ const out=[]; for(const fa of Object.values(state.floors||{})){ for(const r of fa){ if(r.status==='occupied') out.push(r); } } const el=document.getElementById('page-checkouts'); el.innerHTML = out.map(r=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml((r.guest&&r.guest.name)||'Unknown')+'</div><div style="font-size:12px;color:var(--muted)">Room '+escapeHtml(r.number)+'</div></div>').join('')||'<div style="color:var(--muted)">No checkouts</div>'; }
+    function renderPageReservations(){ const res = state.reservations||[]; const el=document.getElementById('page-reservations'); el.innerHTML = (res||[]).map(r=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml(r.name||'')+'</div><div style="font-size:12px;color:var(--muted)">'+escapeHtml(r.date||r._dateFolder||'')+' — '+escapeHtml(r.room||'')+'</div></div>').join('')||'<div style="color:var(--muted)">No reservations</div>'; }
+    function renderPageRents(){ const rents = state.rents||[]; const el=document.getElementById('page-rents'); el.innerHTML = (rents||[]).map(r=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml(r.name||r.description||'')+'</div><div style="font-size:12px;color:var(--muted)">'+escapeHtml(r._dateFolder||r.date||'')+'</div><div style="font-weight:800">₹'+escapeHtml(r.amount||'0')+'</div></div>').join('')||'<div style="color:var(--muted)">No rent records</div>'; }
+    function renderPageExpenses(){ const ex = state.expenses||[]; const el=document.getElementById('page-expenses'); el.innerHTML = (ex||[]).map(e=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml(e.description||'')+'</div><div style="font-size:12px;color:var(--muted)">'+escapeHtml(e._dateFolder||e.date||'')+'</div><div style="font-weight:800">₹'+escapeHtml(e.amount||'0')+'</div></div>').join('')||'<div style="color:var(--muted)">No expenses</div>'; }
+  </script>
+  </div></body></html>`;
+  res.send(html);
+});
+
 const port = process.env.PORT || 4000;
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
