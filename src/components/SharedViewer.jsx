@@ -21,7 +21,8 @@ export default function SharedViewer() {
 
   useEffect(() => {
   // allow passing server base in query (useful when SPA hosted elsewhere like Netlify)
-  const server = serverParam || (window.SHARE_SERVER_URL) || (window.SERVER_BASE) || 'http://localhost:4000';
+  const server = serverParam || (window.SHARE_SERVER_URL) || (window.SERVER_BASE) || null;
+  if (!server) { setErr('no-server'); setMeta('No share server configured (provide server query or set window.SHARE_SERVER_URL)'); return; }
   const base = server.replace(/\/$/, '');
 
     // quick status check to detect invalid token early
@@ -94,7 +95,12 @@ export default function SharedViewer() {
           <div style={{ color: '#666' }}>{meta} {updated ? `· Last update ${new Date(updated).toLocaleString()}` : ''}</div>
         </div>
         <div>
-          <a href={(window.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + id + (token ? ('?k=' + token) : '')} target="_blank" rel="noreferrer">Open server viewer</a>
+          <button onClick={() => {
+            const server = serverParam || window.SHARE_SERVER_URL || window.SERVER_BASE;
+            if (!server) return alert('No server configured for this viewer');
+            const url = server.replace(/\/$/, '') + '/s/' + id + (token ? ('?k=' + token) : '');
+            try { navigator.clipboard.writeText(url); alert('Copied viewer URL'); } catch(e){ window.open(url, '_blank'); }
+          }}>Copy Viewer Link</button>
         </div>
       </header>
 

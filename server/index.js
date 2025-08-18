@@ -55,8 +55,22 @@ app.post('/register', async (req, res) => {
 
   const base = `${req.protocol}://${req.get('host')}`;
   const secureUrl = `${base}/s/${id}?k=${token}`;
+  const serverForClients = advertisedBase || base;
   const publicUrl = isPublic ? (advertisedBase + '/m/' + id) : null;
-  res.json({ id, url: secureUrl, token, publicUrl, advertisedBase: advertisedBase || undefined });
+  // compute Netlify-friendly viewer link when NETLIFY_VIEWER_BASE env or body.netlifyBase is provided
+  const netlifyBaseConfigured = process.env.NETLIFY_VIEWER_BASE || (data && data.netlifyBase) || null;
+  let netlifyUrl = null;
+  if (netlifyBaseConfigured) {
+    const nb = String(netlifyBaseConfigured).replace(/\/$/, '');
+    // mobile-friendly path on SPA (use /m/:id and pass server param so SPA knows where share server is)
+    const serverParam = encodeURIComponent(serverForClients);
+    netlifyUrl = `${nb}/m/${id}?server=${serverParam}`;
+    // if snapshot is not public, include token for convenience
+    if (!isPublic && token) netlifyUrl += `&k=${encodeURIComponent(token)}`;
+  }
+  // prefer netlifyUrl when available for sharing; otherwise use publicUrl (server-hosted)
+  const primaryPublicUrl = netlifyUrl || publicUrl || null;
+  res.json({ id, url: secureUrl, token, publicUrl: primaryPublicUrl, netlifyUrl: netlifyUrl || undefined, advertisedBase: advertisedBase || undefined });
   } catch (err) {
     console.error('register failed', err);
     res.status(500).json({ error: String(err) });

@@ -153,12 +153,16 @@ export default function MobileView({ state }) {
       setShareError('');
       setSharing(true);
       setShareLink('');
-      const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+  const server = (window?.SHARE_SERVER_URL) || null;
       // request a public snapshot so the link is usable from any device without token
+      // include netlifyBase if configured so server can return a non-localhost public URL
+      const netlifyBase = window.NETLIFY_VIEWER_BASE || localStorage.getItem('netlify_viewer_base') || (()=>{ const v = prompt('Enter public viewer base (Netlify site) for non-localhost links'); if(v){ localStorage.setItem('netlify_viewer_base', v); return v; } return null; })();
+      const body = { state, rents, expenses, reservations: (state.reservations || []), public: true };
+      if (netlifyBase) body.netlifyBase = netlifyBase;
       const resp = await fetch(`${server.replace(/\/$/, '')}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []), public: true })
+        body: JSON.stringify(body)
       });
       if (!resp.ok) throw new Error('Server error: ' + resp.status);
       const data = await resp.json();
@@ -167,7 +171,7 @@ export default function MobileView({ state }) {
         setPermanentId(data.id);
         localStorage.setItem('mobile_share_id', data.id);
   // public permanent link (no token) - prefer server-returned publicUrl
-  try { setPublicLink(data.publicUrl || (((window?.SHARE_SERVER_URL) || 'http://localhost:4000').replace(/\/$/, '') + '/m/' + data.id)); } catch (e) {}
+  try { setPublicLink(data.publicUrl || (window?.SHARE_SERVER_URL ? (window.SHARE_SERVER_URL.replace(/\/$/, '') + '/m/' + data.id) : null)); } catch (e) {}
       }
       if (data.token) {
         setShareToken(data.token);
@@ -197,10 +201,11 @@ export default function MobileView({ state }) {
 
   // connect to SSE viewer to show connection status (optional for client)
   useEffect(() => {
-    if (!permanentId) return;
-    const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
+  if (!permanentId) return;
+  const server = (window?.SHARE_SERVER_URL) || null;
     try {
-      const url = `${server.replace(/\/$/, '')}/sse/${permanentId}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
+  if(!server) return setSseConnected(false);
+  const url = `${server.replace(/\/$/, '')}/sse/${permanentId}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
       const src = new EventSource(url);
       src.onopen = () => setSseConnected(true);
       src.onerror = () => setSseConnected(false);
@@ -219,8 +224,9 @@ export default function MobileView({ state }) {
     const id = permanentId || localStorage.getItem('mobile_share_id');
     if (!id) return alert('No permanent id registered');
     try {
-      const server = (window?.SHARE_SERVER_URL) || 'http://localhost:4000';
-      const url = `${server.replace(/\/$/, '')}/update/${id}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
+  const server = (window?.SHARE_SERVER_URL) || null;
+  if(!server) return alert('No share server configured');
+  const url = `${server.replace(/\/$/, '')}/update/${id}` + (shareToken ? ('?k=' + encodeURIComponent(shareToken)) : '');
       const resp = await fetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, rents, expenses, reservations: (state.reservations || []) })
       });
@@ -257,7 +263,9 @@ export default function MobileView({ state }) {
             </button>
             {permanentId && (
               <>
-                <a className="btn" href={(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId} target="_blank" rel="noreferrer">Open Viewer</a>
+                      {window?.SHARE_SERVER_URL ? (
+                        <a className="btn" href={window.SHARE_SERVER_URL.replace(/\/$/, '') + '/s/' + permanentId} target="_blank" rel="noreferrer">Open Viewer</a>
+                      ) : null}
                 <button className="btn" onClick={copyLink}>Copy Link</button>
                 <button className="btn" onClick={pushNow}>Push now</button>
               </>
@@ -299,7 +307,7 @@ export default function MobileView({ state }) {
       {shareError && <div style={{ color: 'red', marginBottom: 8 }}>{shareError}</div>}
       {permanentId && (
         <div className="card" style={{ padding: 8, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId + (shareToken ? ('?k=' + shareToken) : '')}</div>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{window?.SHARE_SERVER_URL ? (window.SHARE_SERVER_URL.replace(/\/$/, '') + '/s/' + permanentId + (shareToken ? ('?k=' + shareToken) : '')) : 'No server configured'}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ fontSize: 12, color: sseConnected ? 'green' : 'orange' }}>{sseConnected ? 'Live' : 'Disconnected'}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{lastUpdated ? new Date(lastUpdated).toLocaleString() : ''}</div>
