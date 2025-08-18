@@ -4,6 +4,7 @@ const { nanoid } = require('nanoid');
 const fs = require('fs');
 const path = require('path');
 const bodyParser = require('body-parser');
+const os = require('os');
 
 const app = express();
 app.use(cors());
@@ -21,13 +22,41 @@ app.post('/register', async (req, res) => {
   const file = path.join(STORE_DIR, id + '.json');
   // allow creating a public snapshot (no token required to view) if requested
   const isPublic = !!data.public;
-  const snapshot = { id, token, public: isPublic, state: data.state || null, rents: data.rents || [], expenses: data.expenses || [], reservations: data.reservations || [], created: Date.now() };
+  // compute advertised base early so we can persist it
+  function detectLanIp() {
+    const nets = os.networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) return net.address;
+      }
+    }
+    return null;
+  }
+  // allow caller to request a specific advertised host (useful when auto-detection fails)
+  const configured = process.env.PUBLIC_HOST || process.env.SHARE_HOST || null;
+  const bodyHost = (data && (data.host || data.publicHost)) ? String(data.host || data.publicHost) : null;
+  const detectedIp = detectLanIp();
+  const port = process.env.PORT || req.socket.localPort || (req.get('host') && req.get('host').split(':')[1]) || 4000;
+  const publicHost = bodyHost || configured || (detectedIp ? `${detectedIp}:${port}` : req.get('host'));
+  const advertisedBase = isPublic ? `${req.protocol}://${publicHost}` : null;
+  const snapshot = { id, token, public: isPublic, advertisedBase, state: data.state || null, rents: data.rents || [], expenses: data.expenses || [], reservations: data.reservations || [], created: Date.now() };
   try { fs.writeFileSync(file, JSON.stringify(snapshot, null, 2)); } catch (e) { console.error('write failed', e); }
-    // notify any listeners (none at registration)
-    const base = `${req.protocol}://${req.get('host')}`;
-    const secureUrl = `${base}/s/${id}?k=${token}`;
-    const publicUrl = isPublic ? `${base}/m/${id}` : null;
-    res.json({ id, url: secureUrl, token, publicUrl });
+    // compute a base URL to advertise for public links.
+    // priority: process.env.PUBLIC_HOST (can include :port) -> detected LAN IPv4 + port -> req.get('host')
+    function detectLanIp() {
+      const nets = os.networkInterfaces();
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+          if (net.family === 'IPv4' && !net.internal) return net.address;
+        }
+      }
+      return null;
+    }
+
+  const base = `${req.protocol}://${req.get('host')}`;
+  const secureUrl = `${base}/s/${id}?k=${token}`;
+  const publicUrl = isPublic ? (advertisedBase + '/m/' + id) : null;
+  res.json({ id, url: secureUrl, token, publicUrl, advertisedBase: advertisedBase || undefined });
   } catch (err) {
     console.error('register failed', err);
     res.status(500).json({ error: String(err) });
@@ -418,41 +447,58 @@ app.get('/m/:id', (req, res) => {
   const id = req.params.id;
   const file = path.join(STORE_DIR, id + '.json');
   if (!fs.existsSync(file)) return res.status(404).send('Not found');
-  const serverBase = `${req.protocol}://${req.get('host')}`;
+  // try to read advertised base from snapshot (if the registrar returned advertisedBase)
+  let serverBase = `${req.protocol}://${req.get('host')}`;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed.advertisedBase) serverBase = parsed.advertisedBase;
+  } catch (e) { /* ignore */ }
   // Serve a streamlined mobile-first viewer; same content as /s/:id but without token validation
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mobile View ${id}</title>
   <style>
-    :root{--bg:#f6f6f6;--card:#fff;--muted:#666}
+    :root{--bg:#f6f6f6;--card:#fff;--muted:#666;--accent:#0b74de}
     html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#111}
-    .wrap{padding:10px}
-    header{display:flex;align-items:center;justify-content:space-between}
-    h1{font-size:16px;margin:0}
+    .wrap{padding:12px;max-width:900px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    h1{font-size:18px;margin:0}
     .rooms{display:flex;flex-direction:column;gap:8px}
     .room-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-    .room{height:56px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff}
+    .room{height:64px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:15px}
     .free{background:#e9ecef;color:#222}
     .occupied{background:#2e8b57}
     .reserved{background:#ff8c00}
-    .card{background:var(--card);padding:10px;border-radius:8px;margin-bottom:8px}
+    .card{background:var(--card);padding:12px;border-radius:10px;margin-bottom:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06)}
     .list{display:flex;flex-direction:column;gap:8px}
     .row{display:flex;justify-content:space-between;align-items:center}
     .controls{display:flex;gap:8px;margin-bottom:8px}
-    @media(min-width:700px){ .mobile-only{display:none} }
+    .muted{font-size:12px;color:var(--muted)}
+    .btn{padding:8px 10px;border-radius:8px;border:1px solid #ddd;background:#fff}
+    .btn.primary{background:var(--accent);color:#fff;border:0}
+    .status{font-size:12px;color:var(--muted);margin-top:6px}
+    @media(max-width:420px){ .room{height:72px;font-size:16px} .room-grid{grid-template-columns:repeat(3,1fr)} }
   </style>
   </head><body>
   <div class="wrap">
     <header>
-      <div><h1>Hotel Surya — Mobile View</h1><div style="font-size:12px;color:var(--muted)">Permanent public view</div></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button onclick="openPage('reservations')">Reservations</button>
-        <button onclick="openPage('checkouts')">Checkouts</button>
-        <button onclick="openPage('rents')">Rents</button>
-        <button onclick="openPage('expenses')">Expenses</button>
+      <div>
+        <h1>Hotel Surya</h1>
+        <div class="muted">Mobile Live View — permanent public link</div>
+        <div id="conn-status" class="status">Connecting...</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="openPage('reservations')">Reservations</button>
+          <button class="btn" onclick="openPage('checkouts')">Checkouts</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn" id="shareBtn">Share</button>
+          <button class="btn primary" onclick="location.reload()">Refresh</button>
+        </div>
       </div>
     </header>
 
     <div class="card">
-      <strong>Rooms</strong>
+      <div style="display:flex;justify-content:space-between;align-items:center"><strong>Rooms</strong><div class="muted" id="rooms-meta"></div></div>
       <div id="rooms" class="rooms">Loading...</div>
     </div>
 
@@ -464,7 +510,7 @@ app.get('/m/:id', (req, res) => {
 
     <div id="page-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:80;padding:12px;box-sizing:border-box">
       <div style="max-width:920px;margin:0 auto;background:var(--card);border-radius:8px;padding:12px;position:relative;height:90vh;overflow:auto">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong id="page-title">Details</strong><button onclick="closePage()">Close</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong id="page-title">Details</strong><button class="btn" onclick="closePage()">Close</button></div>
         <div id="page-checkouts" style="display:none"></div>
         <div id="page-reservations" style="display:none"></div>
         <div id="page-rents" style="display:none"></div>
@@ -476,10 +522,14 @@ app.get('/m/:id', (req, res) => {
     const SERVER_BASE = ${JSON.stringify(serverBase)};
     const id = ${JSON.stringify(id)};
     let state = {};
+    const publicLink = SERVER_BASE + '/m/' + id;
     function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function renderRooms(){ const roomsEl = document.getElementById('rooms'); const floors = state.floors||{}; const keys = Object.keys(floors).sort((a,b)=>Number(a)-Number(b)); if(!keys.length){ roomsEl.innerHTML='<div style="color:var(--muted)">No rooms</div>'; return };
       const today = new Date().toISOString().slice(0,10); const reservedSet = new Set((state.reservations||[]).filter(r=>String(r.date||'').slice(0,10)===today).map(r=>Number(r.room)));
-      roomsEl.innerHTML = keys.map(f=> '<div style="margin-bottom:8px"><div style="font-weight:700">Floor '+f+'</div><div class="room-grid">'+ (floors[f]||[]).map(r=>{ let cls = (r.status||'free')==='occupied'?'occupied':((r.status||'free')==='reserved'?'reserved':'free'); if((!r.status||r.status==='free') && reservedSet.has(Number(r.number))) cls='reserved'; return '<div class="room '+cls+'">'+escapeHtml(r.number)+'</div>' }).join('') +'</div></div>').join(''); }
+      let total=0, occ=0, resv=0;
+      const html = keys.map(f=> { const roomsHtml = (floors[f]||[]).map(r=>{ total++; let cls = (r.status||'free')==='occupied'?'occupied':((r.status||'free')==='reserved'?'reserved':'free'); if((!r.status||r.status==='free') && reservedSet.has(Number(r.number))) { cls='reserved'; resv++; } if(cls==='occupied') occ++; return '<div class="room '+cls+'">'+escapeHtml(r.number)+'</div>'; }).join(''); return '<div style="margin-bottom:8px"><div style="font-weight:700">Floor '+f+'</div><div class="room-grid">'+roomsHtml+'</div></div>'; }).join('');
+      roomsEl.innerHTML = html; document.getElementById('rooms-meta').textContent = total + ' rooms — ' + occ + ' occupied · ' + resv + ' reserved';
+    }
     function buildGuestList(){ const out=[]; for(const fa of Object.values(state.floors||{})){ for(const r of fa){ if(r.status==='occupied' && r.guest) out.push({name:r.guest.name, contact:r.guest.contact, room:r.number, checkIn:r.guest.checkIn||r.guest.checkInDate||''}); } } return out; }
     function renderGuests(){ const g = buildGuestList(); document.getElementById('guest-count').textContent = g.length? g.length+' guests':''; const q=(document.getElementById('guest-search').value||'').toLowerCase().trim(); const out = g.filter(x=>!q||Object.values(x).some(v=>String(v||'').toLowerCase().includes(q))).map(x=>'<div class="row"><div><div style="font-weight:700">'+escapeHtml(x.name)+'</div><div style="font-size:12px;color:var(--muted)">Room '+escapeHtml(x.room)+' — '+escapeHtml(x.contact||'')+'</div></div><div><button onclick="openId(\''+encodeURIComponent(x.name)+'\')">Open ID</button></div></div>').join('')||'<div style="color:var(--muted)">No guests</div>'; document.getElementById('guest-list').innerHTML = out; }
     function openId(name){ try{ window.open('/','_blank'); }catch(e){} }
@@ -489,6 +539,12 @@ app.get('/m/:id', (req, res) => {
     const evt = new EventSource(SERVER_BASE + '/sse/' + id);
     evt.onmessage = (ev)=>{ try{ const msg=JSON.parse(ev.data); if(msg.type==='init' || msg.type==='update'){ state = msg.state||{}; if(msg.rents) state.rents=msg.rents; if(msg.expenses) state.expenses=msg.expenses; if(msg.reservations) state.reservations=msg.reservations; } renderAll(); }catch(e){} };
     evt.onerror = ()=>{};
+    evt.onopen = ()=>{ const s=document.getElementById('conn-status'); if(s) s.textContent = 'Connected'; };
+    evt.onclose = ()=>{ const s=document.getElementById('conn-status'); if(s) s.textContent = 'Disconnected'; };
+    // share button copies the public link
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const b = document.getElementById('shareBtn'); if(!b) return; b.addEventListener('click', ()=>{ try{ navigator.share ? navigator.share({ title: 'Hotel Surya Live', url: publicLink }) : (navigator.clipboard && navigator.clipboard.writeText(publicLink)); b.textContent = 'Copied'; setTimeout(()=>b.textContent='Share',1500); }catch(e){ try{ navigator.clipboard && navigator.clipboard.writeText(publicLink); b.textContent='Copied'; setTimeout(()=>b.textContent='Share',1500); }catch(_){} } });
+    });
     function openPage(which){ document.getElementById('page-overlay').style.display='block'; document.getElementById('page-title').textContent = which; ['checkouts','reservations','rents','expenses'].forEach(k=>{ const el=document.getElementById('page-'+k); el.style.display = (k===which)?'block':'none'; }); if(which==='checkouts') renderPageCheckouts(); if(which==='reservations') renderPageReservations(); if(which==='rents') renderPageRents(); if(which==='expenses') renderPageExpenses(); }
     function closePage(){ document.getElementById('page-overlay').style.display='none'; }
     function renderPageCheckouts(){ const out=[]; for(const fa of Object.values(state.floors||{})){ for(const r of fa){ if(r.status==='occupied') out.push(r); } } const el=document.getElementById('page-checkouts'); el.innerHTML = out.map(r=>'<div style="padding:8px;border-bottom:1px solid #eee"><div style="font-weight:700">'+escapeHtml((r.guest&&r.guest.name)||'Unknown')+'</div><div style="font-size:12px;color:var(--muted)">Room '+escapeHtml(r.number)+'</div></div>').join('')||'<div style="color:var(--muted)">No checkouts</div>'; }
