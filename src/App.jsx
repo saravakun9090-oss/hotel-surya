@@ -10,6 +10,7 @@ import { Line, Doughnut, Bar } from "react-chartjs-2";
 // MobileView replaced by server-hosted public mobile viewer (/m/:id)
 import SharedViewer from './components/SharedViewer';
 import LiveUpdates from './components/LiveUpdates';
+import PublicLive from './components/PublicLive';
 
 
 import {
@@ -3924,6 +3925,8 @@ export default function App() {
   {/* legacy mobile route removed; use "Open Live Mobile" button on Dashboard */}
       <Route path="/s/:id" element={<SharedViewer />} />
             <Route path="/liveupdates" element={<LiveUpdates />} />
+            <Route path="/liveupdate173" element={<PublicLive id={'173'} />} />
+            <Route path="/liveupdate/:id" element={<PublicLive />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
