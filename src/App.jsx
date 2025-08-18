@@ -9,6 +9,7 @@ import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
 // MobileView replaced by server-hosted public mobile viewer (/m/:id)
 import SharedViewer from './components/SharedViewer';
+import LiveUpdates from './components/LiveUpdates';
 
 
 import {
@@ -43,41 +44,6 @@ ChartJS.register(
 
 const STORAGE_KEY = 'hotel_demo_v2';
 
-// Live share storage key
-const SHARE_KEY = 'hotel_demo_share';
-
-async function registerShareOnServer(serverBase, state, isPublic = false, netlifyBase = null) {
-  const url = String(serverBase).replace(/\/$/, '') + '/register';
-  const body = { public: !!isPublic, state: state || null };
-  if (netlifyBase) body.netlifyBase = netlifyBase;
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error('Register failed: ' + res.status);
-  return await res.json();
-}
-
-async function sendUpdateToServer(serverBase, id, token, state) {
-  const base = String(serverBase).replace(/\/$/, '');
-  const url = base + '/update/' + encodeURIComponent(id) + (token ? ('?k=' + encodeURIComponent(token)) : '');
-  try {
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, reservations: state.reservations || [] }) });
-    if (!res.ok) {
-      console.warn('Share update failed', await res.text());
-    }
-    return true;
-  } catch (err) {
-    console.warn('Failed to send update', err);
-    return false;
-  }
-}
-
-function loadShareInfo() {
-  try { return JSON.parse(localStorage.getItem(SHARE_KEY) || 'null'); } catch (e) { return null; }
-}
-
-function saveShareInfo(obj) {
-  try { localStorage.setItem(SHARE_KEY, JSON.stringify(obj)); } catch (e) { /* ignore */ }
-}
-
 // Seed generator with 4 rooms per floor
 const generateDefault = () => {
   const floors = {};
@@ -108,13 +74,14 @@ const Sidebar = () => (
     <div className="logo">🏨 HOTEL SURYA</div>
     <div className="subtitle">Manage check-ins, checkouts & reservations</div>
     <nav className="nav">
-      <Link to="/">Dashboard</Link>
-      <Link to="/checkin">Check-in</Link>
-      <Link to="/checkout">Check-out</Link>
-      <Link to="/reservations">Reservations</Link>
-      <Link to="/floors">Floors</Link>
-      <Link to="/storage">Storage</Link>
-      <Link to="/accounts" className="btn">Accounts</Link>
+    <Link to="/">Dashboard</Link>
+    <Link to="/checkin">Check-in</Link>
+    <Link to="/checkout">Check-out</Link>
+    <Link to="/reservations">Reservations</Link>
+    <Link to="/floors">Floors</Link>
+    <Link to="/liveupdates">Live Updates</Link>
+    <Link to="/storage">Storage</Link>
+    <Link to="/accounts" className="btn">Accounts</Link>
   <Link to="/analysis">Analysis</Link>
       
 
@@ -143,99 +110,6 @@ const RoomCard = ({ room, onClick }) => (
     </div>
   </div>
 );
-
-function LiveSharePanel({ shareInfo, setShareInfo, sharing, setSharing, shareStatus, setShareStatus, state }) {
-  const [server, setServer] = useState((shareInfo && shareInfo.server) || 'http://localhost:4000');
-  const [isPublic, setIsPublic] = useState(Boolean(shareInfo && shareInfo.public));
-  const [netlifyBase, setNetlifyBase] = useState((shareInfo && shareInfo.netlifyBase) || '');
-  const [lastError, setLastError] = useState(null);
-
-  const testServer = async () => {
-    try {
-      setShareStatus('Checking server...');
-      const health = await fetch(String(server).replace(/\/$/, '') + '/health', { cache: 'no-store' });
-      if (!health.ok) throw new Error('health check failed: ' + health.status);
-      const j = await health.json().catch(() => null);
-      setShareStatus('Server OK');
-      setLastError(null);
-      return true;
-    } catch (err) {
-      console.warn('Server health check failed', err);
-      setLastError(err?.message || String(err));
-      setShareStatus('Server unreachable');
-      return false;
-    }
-  };
-
-  const startShare = async () => {
-    setLastError(null);
-    if (!(await testServer())) return;
-    try {
-      setShareStatus('Registering...');
-      const res = await registerShareOnServer(server, state, isPublic, netlifyBase || null);
-      const info = { server, id: res.id, token: res.token, public: !!res.public, url: res.netlifyUrl || res.publicUrl || (res.advertisedBase ? (res.advertisedBase + '/m/' + res.id) : null), netlifyBase };
-      setShareInfo(info);
-      saveShareInfo(info);
-      setSharing(true);
-      setShareStatus('Live');
-      setLastError(null);
-    } catch (err) {
-      console.error('Register failed', err);
-      const msg = (err && err.message) ? err.message : String(err);
-      setLastError(msg);
-      setShareStatus('Register failed');
-    }
-  };
-
-  const stopShare = () => {
-    setSharing(false);
-    setShareStatus('Stopped');
-  };
-
-  const copyLink = async () => {
-    try {
-      if (shareInfo && shareInfo.url) {
-        await navigator.clipboard.writeText(shareInfo.url);
-        setShareStatus('Link copied');
-        setTimeout(() => setShareStatus('Live'), 1200);
-      }
-    } catch (e) {
-      console.warn('Copy failed', e);
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input value={server} onChange={(e) => setServer(e.target.value)} style={{ width: 220, padding: '6px 8px', borderRadius: 6, border: '1px solid #ddd' }} />
-          <button className="btn" onClick={testServer} style={{ padding: '6px 8px' }}>Test</button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Public</label>
-          <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-          <input placeholder="(optional) Netlify base" value={netlifyBase} onChange={(e)=>setNetlifyBase(e.target.value)} style={{ width: 200, padding: '6px 8px', borderRadius: 6, border: '1px solid #eee' }} />
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        {!sharing ? (
-          <button className="pill" onClick={startShare}>Start Live</button>
-        ) : (
-          <>
-            {shareInfo && shareInfo.url && (
-              <a href={shareInfo.url} target="_blank" rel="noreferrer" className="pill" style={{ background: 'var(--deep)', color: 'var(--cream)' }}>{new URL(shareInfo.url).host}</a>
-            )}
-            <button className="pill" onClick={copyLink}>Copy Link</button>
-            <button className="pill" onClick={stopShare}>Stop</button>
-          </>
-        )}
-      </div>
-
-      <div style={{ fontSize: 12, color: lastError ? '#c91818' : 'var(--muted)' }}>{lastError || shareStatus || 'Not sharing'}</div>
-    </div>
-  );
-}
 
 const Modal = ({ children, onClose }) => (
   <div className="modal" onClick={onClose}>
@@ -286,28 +160,6 @@ const todayISO = ymd();
 
   const navigate = useNavigate();
 
-  // Live share panel state
-  const [shareInfo, setShareInfo] = useState(loadShareInfo());
-  const [sharing, setSharing] = useState(Boolean(shareInfo && shareInfo.id));
-  const [shareStatus, setShareStatus] = useState('');
-
-  useEffect(() => {
-    // save share info locally whenever it changes
-    saveShareInfo(shareInfo);
-  }, [shareInfo]);
-
-  // send updates when app state changes and sharing is active
-  useEffect(() => {
-    if (!sharing || !shareInfo || !shareInfo.server) return;
-    let cancelled = false;
-    (async () => {
-      setShareStatus('Sending...');
-      const ok = await sendUpdateToServer(shareInfo.server, shareInfo.id, shareInfo.token, state);
-      if (!cancelled) setShareStatus(ok ? 'Live' : 'Failed');
-    })();
-    return () => { cancelled = true; };
-  }, [state, sharing, shareInfo]);
-
 const checkInReservation = (res) => {
   navigate('/checkin', {
     state: {
@@ -350,9 +202,6 @@ const checkInReservation = (res) => {
                 Floor {f}
               </Link>
             ))}
-          </div>
-          <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <LiveSharePanel shareInfo={shareInfo} setShareInfo={setShareInfo} sharing={sharing} setSharing={setSharing} shareStatus={shareStatus} setShareStatus={setShareStatus} state={state} />
           </div>
         </div>
       </div>
@@ -4074,6 +3923,7 @@ export default function App() {
             <Route path="/analysis" element={<Analysis />} />
   {/* legacy mobile route removed; use "Open Live Mobile" button on Dashboard */}
       <Route path="/s/:id" element={<SharedViewer />} />
+            <Route path="/liveupdates" element={<LiveUpdates />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 

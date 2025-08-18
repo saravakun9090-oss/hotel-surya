@@ -1,0 +1,161 @@
+{
+  "id": "O-UUzL5TrN",
+  "token": "1mv11hS6",
+  "public": true,
+  "advertisedBase": "http://192.168.1.2:4000",
+  "state": {
+    "floors": {
+      "1": [
+        {
+          "number": 101,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 102,
+          "status": "reserved",
+          "guest": null,
+          "reservedFor": {
+            "name": "A. Kumar",
+            "from": "2025-08-15"
+          }
+        },
+        {
+          "number": 103,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 104,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "2": [
+        {
+          "number": 201,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 202,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 203,
+          "status": "occupied",
+          "guest": {
+            "name": "Ravi",
+            "contact": "9876543210",
+            "checkIn": "2025-08-18T08:28:31.436Z",
+            "id": "ID123",
+            "rate": 1500
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 204,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "3": [
+        {
+          "number": 301,
+          "status": "occupied",
+          "guest": {
+            "name": "Priya",
+            "contact": "9345678123",
+            "checkIn": "2025-08-18T08:28:31.437Z",
+            "id": "DL998",
+            "rate": 2000
+          },
+          "reservedFor": null
+        },
+        {
+          "number": 302,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 303,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 304,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "4": [
+        {
+          "number": 401,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 402,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 403,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 404,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        }
+      ],
+      "5": [
+        {
+          "number": 501,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 502,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 503,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        },
+        {
+          "number": 504,
+          "status": "free",
+          "guest": null,
+          "reservedFor": null
+        }
+      ]
+    },
+    "guests": []
+  },
+  "rents": [],
+  "expenses": [],
+  "reservations": [],
+  "created": 1755509471199,
+  "updated": 1755509471256
+}
