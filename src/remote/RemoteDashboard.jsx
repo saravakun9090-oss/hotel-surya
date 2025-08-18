@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getFirestore, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { initializeApp } from 'firebase/app';
+import * as cloudSync from '../services/cloudSync';
 
 // Simple owner-only dashboard that requires a shared password set via env var REACT_APP_OWNER_PASSWORD
 // It reads Firestore collections: checkins, checkouts, reservations, rents, expenses
@@ -71,6 +72,18 @@ export default function RemoteDashboard() {
   return (
     <div style={{ padding: 12 }}>
       <h2>Owner Live Dashboard</h2>
+      <div style={{ marginBottom: 8 }}>
+        <strong>Firebase:</strong> {db ? <span style={{ color: 'green' }}>connected</span> : <span style={{ color: 'crimson' }}>not configured</span>} {' '}
+        {db && (
+          <button className="btn" style={{ marginLeft: 8 }} onClick={async () => {
+            try {
+              const sample = { name: 'Owner Test', room: [101], checkIn: new Date().toISOString(), rate: 0 };
+              await cloudSync.pushCheckin(sample);
+              alert('Test checkin pushed');
+            } catch (e) { alert('Test push failed: ' + (e?.message || e)); }
+          }}>Send test check-in</button>
+        )}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div className="card">
           <h3>Recent Check-ins</h3>
