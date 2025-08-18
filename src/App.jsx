@@ -7,6 +7,7 @@ import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
+import MobileView from './components/MobileView';
 
 
 import {
@@ -79,6 +80,7 @@ const Sidebar = () => (
       <Link to="/storage">Storage</Link>
       <Link to="/accounts" className="btn">Accounts</Link>
       <Link to="/analysis">Analysis</Link>
+  <Link to="/mobile">Mobile View</Link>
       
 
     </nav>
@@ -1625,29 +1627,39 @@ function CheckIn({ state, setState, locationState }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                          {g.guest?.contact && (
-                            <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.guest.contact}</div>
-                          )}
+                        <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          
+                          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {name}
+          </div>
+          
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            Room {(g.rooms || []).join(', ')}
+          </div>
+          
+
+                          
                           {g.guest?.edited && (
                             <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
                           )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>₹{g.guest?.rate || 0}/day</div>
-                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Paid: ₹{paymentsMap[groupKey(g)] || 0}</div>
-                      </div>
+                      
+                      
                     </div>
-                    <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{(g.rooms || []).join(', ')}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>Floor {String(g.rooms[0])[0]}</div>
-                    </div>
-                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)' }}>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || "").toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
-                  </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
+            <div>Phone no: {g.guest.contact}</div>
+            <div>Price: ₹{g.guest?.rate || 0}/day</div>
+            <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || "").toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
+            <div>Paid: ₹{paymentsMap[groupKey(g)] || 0}</div>
+            
+          </div>
+                    
+                    
+                    </div>
+
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
                     <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: '#2f4338', color: '#f1eedf'}} onClick={() => openEditModal(g)}>Edit</button>
                     {scannedMap[groupKey(g)] ? (
                       <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
@@ -3905,6 +3917,7 @@ export default function App() {
             <Route path="/storage" element={<StorageSetup setState={setState} state={state} />} />
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
+            <Route path="/mobile" element={<MobileView state={state} />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
