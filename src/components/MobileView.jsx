@@ -247,15 +247,18 @@ export default function MobileView({ state }) {
         <button className="btn" onClick={() => navigate(-1)}>Back</button>
         <h2 style={{ margin: 0, fontSize: 18, flex: 1 }}>Mobile View</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {!permanentId ? (
-            <button className="btn primary" onClick={shareSnapshot} disabled={sharing} style={{ padding: '6px 10px' }}>{sharing ? 'Creating...' : 'Create Permanent Link'}</button>
-          ) : (
-            <>
-              <a className="btn" href={(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId} target="_blank" rel="noreferrer">Open Viewer</a>
-              <button className="btn" onClick={copyLink}>Copy Link</button>
-              <button className="btn" onClick={pushNow}>Push now</button>
-            </>
-          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary" onClick={shareSnapshot} disabled={sharing} style={{ padding: '6px 10px' }}>
+              {sharing ? 'Creating...' : (permanentId ? 'Recreate Permanent Link' : 'Create Permanent Link')}
+            </button>
+            {permanentId && (
+              <>
+                <a className="btn" href={(window?.SHARE_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '') + '/s/' + permanentId} target="_blank" rel="noreferrer">Open Viewer</a>
+                <button className="btn" onClick={copyLink}>Copy Link</button>
+                <button className="btn" onClick={pushNow}>Push now</button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

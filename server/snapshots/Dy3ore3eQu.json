@@ -63,9 +63,16 @@
       "2": [
         {
           "number": 201,
-          "status": "free",
+          "status": "occupied",
           "rate": 2500,
-          "guest": null,
+          "guest": {
+            "name": "kkkkkk",
+            "contact": "23456789",
+            "checkIn": "2025-08-18T05:28:11.050Z",
+            "checkInDate": "18/08/2025",
+            "checkInTime": "10:58:11",
+            "rate": 2000
+          },
           "reservedFor": null
         },
         {
@@ -349,24 +356,17 @@
         "edited": false
       },
       {
+        "room": 103,
+        "name": "saravana",
+        "contact": "7558178181",
+        "checkIn": "2025-08-17T13:48:43.949Z",
+        "edited": true
+      },
+      {
         "room": 202,
         "name": "saravana",
         "contact": "7558178181",
         "checkIn": "2025-08-17T11:55:20.015Z",
-        "edited": true
-      },
-      {
-        "room": 303,
-        "name": "saravanajj",
-        "contact": "1212111",
-        "checkIn": "2025-08-17T10:17:45.657Z",
-        "edited": false
-      },
-      {
-        "room": 102,
-        "name": "saravana ",
-        "contact": "13123",
-        "checkIn": "2025-08-17T11:54:01.549Z",
         "edited": true
       },
       {
@@ -377,11 +377,11 @@
         "edited": true
       },
       {
-        "room": 103,
-        "name": "saravana",
-        "contact": "7558178181",
-        "checkIn": "2025-08-17T13:48:43.949Z",
-        "edited": true
+        "room": 303,
+        "name": "saravanajj",
+        "contact": "1212111",
+        "checkIn": "2025-08-17T10:17:45.657Z",
+        "edited": false
       },
       {
         "room": 404,
@@ -389,6 +389,13 @@
         "contact": "4567",
         "checkIn": "2025-08-17T10:55:12.592Z",
         "edited": false
+      },
+      {
+        "room": 102,
+        "name": "saravana ",
+        "contact": "13123",
+        "checkIn": "2025-08-17T11:54:01.549Z",
+        "edited": true
       },
       {
         "room": 104,
@@ -538,6 +545,15 @@
     },
     {
       "name": "sagar seal",
+      "room": "301",
+      "days": "1",
+      "amount": "1000",
+      "mode": "Cash",
+      "date": "2025-08-17T06:07:25.578Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "sagar seal",
       "room": [
         301,
         302
@@ -550,15 +566,6 @@
     },
     {
       "name": "sagar seal",
-      "room": "301",
-      "days": "1",
-      "amount": "1000",
-      "mode": "Cash",
-      "date": "2025-08-17T06:07:25.578Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "sagar seal",
       "room": [
         404
       ],
@@ -566,17 +573,6 @@
       "amount": "1200",
       "mode": "Cash",
       "date": "2025-08-17T07:55:28.972Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "sagar seal",
-      "room": [
-        502
-      ],
-      "days": "1",
-      "amount": "1000",
-      "mode": "Cash",
-      "date": "2025-08-17T09:10:08.269Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -596,9 +592,9 @@
         103
       ],
       "days": "1",
-      "amount": "1000",
+      "amount": "500",
       "mode": "Cash",
-      "date": "2025-08-17T14:10:07.345Z",
+      "date": "2025-08-17T15:32:41.072Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -607,9 +603,20 @@
         103
       ],
       "days": "1",
-      "amount": "500",
+      "amount": "1000",
       "mode": "Cash",
-      "date": "2025-08-17T15:32:41.072Z",
+      "date": "2025-08-17T14:10:07.345Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "sagar seal",
+      "room": [
+        502
+      ],
+      "days": "1",
+      "amount": "1000",
+      "mode": "Cash",
+      "date": "2025-08-17T09:10:08.269Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -631,7 +638,7 @@
       "days": "1",
       "amount": "500",
       "mode": "Cash",
-      "date": "2025-08-17T14:11:34.982Z",
+      "date": "2025-08-17T13:48:22.758Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -642,7 +649,7 @@
       "days": "1",
       "amount": "500",
       "mode": "Cash",
-      "date": "2025-08-17T13:48:22.758Z",
+      "date": "2025-08-17T14:11:34.982Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -658,15 +665,6 @@
     },
     {
       "name": "saravana",
-      "room": "401",
-      "days": "1",
-      "amount": "2000",
-      "mode": "Cash",
-      "date": "2025-08-16T18:45:51.095Z",
-      "_dateFolder": "2025-08-17"
-    },
-    {
-      "name": "saravana",
       "room": [
         402
       ],
@@ -674,6 +672,15 @@
       "amount": "1000",
       "mode": "Cash",
       "date": "2025-08-17T13:33:23.389Z",
+      "_dateFolder": "2025-08-17"
+    },
+    {
+      "name": "saravana",
+      "room": "401",
+      "days": "1",
+      "amount": "2000",
+      "mode": "Cash",
+      "date": "2025-08-16T18:45:51.095Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -746,9 +753,9 @@
         504
       ],
       "days": "1",
-      "amount": "2000",
+      "amount": "3000",
       "mode": "Cash",
-      "date": "2025-08-17T09:06:29.415Z",
+      "date": "2025-08-17T09:05:41.821Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -757,9 +764,9 @@
         504
       ],
       "days": "1",
-      "amount": "3000",
+      "amount": "2000",
       "mode": "Cash",
-      "date": "2025-08-17T09:05:41.821Z",
+      "date": "2025-08-17T09:06:29.415Z",
       "_dateFolder": "2025-08-17"
     },
     {
@@ -813,5 +820,5 @@
     }
   ],
   "created": 1755493220859,
-  "updated": 1755494275158
+  "updated": 1755494892178
 }
