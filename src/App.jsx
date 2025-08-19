@@ -2,11 +2,14 @@ import React, { useEffect,useRef, useState, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from "react-router-dom";
 
-import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
+import { getBaseFolder, ensurePath, writeJSON, writeFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
+import { writeSharedSnapshot } from './utils/sharedSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
+// MobileView replaced by server-hosted public mobile viewer (/m/:id)
+import SharedViewer from './components/SharedViewer';
 
 
 import {
@@ -63,25 +66,7 @@ function loadState() {
   if (!raw) { const s = generateDefault(); localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); return s; }
   try { return JSON.parse(raw); } catch (e) { const s = generateDefault(); localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); return s; }
 }
-async function updateLinkFileWithState(state) {
-  try {
-    const base = await getBaseFolder();
-    if (!base) return;
-    // read existing link.json
-    try {
-      const files = await base.getFileHandle?.('link.json').then(() => null).catch(() => null);
-    } catch (e) {
-      // ignore
-    }
-    // write a snapshot and update lastUpdated
-    const payload = { lastUpdated: new Date().toISOString(), snapshot: state };
-    await writeJSON(base, 'link.json', payload);
-  } catch (err) {
-    console.warn('Could not update link.json', err);
-  }
-}
-
-function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); updateLinkFileWithState(state); }
+function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
 // ---------- Small UI components ----------
 const Sidebar = () => (
@@ -96,7 +81,7 @@ const Sidebar = () => (
       <Link to="/floors">Floors</Link>
       <Link to="/storage">Storage</Link>
       <Link to="/accounts" className="btn">Accounts</Link>
-      <Link to="/analysis">Analysis</Link>
+  <Link to="/analysis">Analysis</Link>
       
 
     </nav>
@@ -3907,7 +3892,16 @@ function KPI({ title, value, color }) {
 // ---------- App ----------
 export default function App() {
   const [state, setState] = useState(loadState());
+  // debounced shared snapshot write
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try { writeSharedSnapshot(state); } catch (e) { /* ignore */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [state]);
   useEffect(() => { saveState(state); }, [state]);
+
+  // (mobile share feature removed) previously we pushed state to a local share server when a permanent id was registered.
 
   useEffect(() => {
   (async () => {
@@ -3923,7 +3917,7 @@ export default function App() {
       <div className="app-shell">
         <Sidebar />
         <div className="main">
-          <Routes>
+      <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
             <Route path="/floors" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/floors/:floor" element={<FloorsContainer state={state} setState={setState} />} />
@@ -3933,6 +3927,8 @@ export default function App() {
             <Route path="/storage" element={<StorageSetup setState={setState} state={state} />} />
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
+  {/* legacy mobile route removed; use "Open Live Mobile" button on Dashboard */}
+      <Route path="/s/:id" element={<SharedViewer />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 

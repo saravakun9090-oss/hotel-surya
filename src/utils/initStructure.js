@@ -1,36 +1,41 @@
 // src/utils/initStructure.js
-import { ensureDir, listFiles, readJSONFile, writeJSON } from './fsAccess';
+import { ensureDir, writeJSON, readJSONFile } from './fsAccess';
 import { monthFolder, displayDate } from './dateUtils';
 
+// Ensure the main folder tree exists and create a persistent sharing link (link.json)
+// The function will create fixed folders and a stable `link.json` at the root when missing.
 export async function initFullFolderTree(baseHandle) {
-  const fixed = ['Reservations', 'Checkins', 'Checkouts', 'ScannedDocuments'];
+  const fixed = ['Reservations', 'Checkins', 'Checkouts', 'ScannedDocuments', 'RentCollections', 'Expenses'];
   for (const d of fixed) await ensureDir(baseHandle, d);
 
-  
-
-  const mName = monthFolder(new Date());
-  const today = displayDate(new Date());
-  
-
-  console.log('Folder structure ready.');
+  // ensure a Shared folder for snapshot files
+  await ensureDir(baseHandle, 'Shared');
 
   // Ensure a persistent sharing link exists at the root (link.json).
   try {
-    // Look for existing link.json at root
-    const jsonFiles = await listFiles(baseHandle, '.json');
-    const linkFile = jsonFiles.find(f => f.name === 'link.json');
-    if (!linkFile) {
-      const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-      const url = `https://hotelsurya.netlify.app/?link=${id}`;
-      const payload = { id, url, createdAt: new Date().toISOString(), lastUpdated: null };
+    let existing = null;
+    try {
+      const fh = await baseHandle.getFileHandle('link.json');
+      existing = await readJSONFile(fh);
+    } catch (e) {
+      // file doesn't exist
+      existing = null;
+    }
+
+    if (!existing || !existing.id) {
+      const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      // Use path style /<id> for nicer links
+      const url = `https://hotelsurya.netlify.app/${id}`;
+      const payload = { id, url, createdAt: new Date().toISOString() };
       await writeJSON(baseHandle, 'link.json', payload);
-      console.log('Created persistent link.json');
+      console.log('Created persistent link.json', payload);
+      return payload;
     } else {
-      // leave existing link as-is
-      const existing = await readJSONFile(linkFile.handle);
       console.log('link.json exists', existing?.id ?? 'no-id');
+      return existing;
     }
   } catch (err) {
     console.warn('Could not ensure link.json', err);
+    return null;
   }
 }
