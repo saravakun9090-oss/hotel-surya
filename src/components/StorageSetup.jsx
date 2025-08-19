@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { chooseBaseFolder, getBaseFolder, readJSONFile } from '../utils/fsAccess';
+import { chooseBaseFolder, getBaseFolder } from '../utils/fsAccess';
 import { initFullFolderTree } from '../utils/initStructure';
-import { hydrateStateFromDisk } from '../services/diskSync';
+import { hydrateStateFromDisk, upsertDiskDoc } from '../services/diskSync';
+import { initGun, subscribeCollection, putDoc, offCollection } from '../services/realtime';
 
 export default function StorageSetup({ setState, state }) {
   const [status, setStatus] = useState('Checking...');
   const [connected, setConnected] = useState(false);
-  const [link, setLink] = useState(null);
+  const [p2pEnabled, setP2pEnabled] = useState(false);
+  const [peers, setPeers] = useState('https://gun-manhattan.herokuapp.com/gun'); // default public peer for testing
 
   useEffect(() => {
     (async () => {
@@ -14,24 +16,6 @@ export default function StorageSetup({ setState, state }) {
       if (base) {
         setConnected(true);
         setStatus('Connected');
-        // try to read persistent link
-        try {
-          const files = await base.getFileHandle?.('link.json').then(() => null).catch(() => null);
-        } catch (e) {}
-        try {
-          // use entries to find link.json handle
-          for await (const [name, handle] of base.entries()) {
-            if (name === 'link.json' && handle.kind === 'file') {
-              const data = await readJSONFile(handle);
-              if (data?.url) setLink(data.url);
-              if (data?.id && !data.url) setLink(`https://hotelsurya.netlify.app/?link=${data.id}`);
-              break;
-            }
-          }
-        } catch (err) {
-          // ignore
-        }
-
         const synced = await hydrateStateFromDisk(state);
         if (synced) setState(synced);
       } else {
@@ -41,24 +25,52 @@ export default function StorageSetup({ setState, state }) {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!p2pEnabled) return;
+    // initialize gun with peers
+    const peerList = peers.split(',').map(p => p.trim()).filter(Boolean);
+    initGun({ peers: peerList });
+
+    // subscribe to relevant collections
+    const applyRemote = async (collection, key, data) => {
+      try {
+        // merge into local state depending on collection
+        if (collection === 'checkins') {
+          // write to disk and optionally merge into in-memory state by rehydrating
+          await upsertDiskDoc('Checkins', { ...data, id: key });
+        } else if (collection === 'reservations') {
+          await upsertDiskDoc('Reservations', { ...data, id: key });
+        } else {
+          // generic
+          await upsertDiskDoc(collection, { ...data, id: key });
+        }
+
+        // re-hydrate from disk to get canonical state and set it
+        const newState = await hydrateStateFromDisk(state);
+        if (newState) setState(newState);
+      } catch (err) {
+        console.warn('applyRemote error', err);
+      }
+    };
+
+    // wrapper for subscribeCollection to capture name
+    const subCheckin = (key, data) => applyRemote('checkins', key, data);
+    const subRes = (key, data) => applyRemote('reservations', key, data);
+
+    subscribeCollection('checkins', (key, data) => subCheckin(key, data));
+    subscribeCollection('reservations', (key, data) => subRes(key, data));
+
+    return () => {
+      try { offCollection('checkins'); offCollection('reservations'); } catch (e) {}
+    };
+  }, [p2pEnabled, peers]);
+
   const connect = async () => {
     try {
       const base = await chooseBaseFolder();
       await initFullFolderTree(base);
       setConnected(true);
       setStatus('Connected & folders created');
-
-      // read persistent link
-      try {
-        for await (const [name, handle] of base.entries()) {
-          if (name === 'link.json' && handle.kind === 'file') {
-            const data = await readJSONFile(handle);
-            if (data?.url) setLink(data.url);
-            if (data?.id && !data.url) setLink(`https://hotelsurya.netlify.app/?link=${data.id}`);
-            break;
-          }
-        }
-      } catch (err) {}
 
       const synced = await hydrateStateFromDisk(state);
       if (synced) setState(synced);
@@ -68,6 +80,11 @@ export default function StorageSetup({ setState, state }) {
     }
   };
 
+  const toggleP2P = () => {
+    setP2pEnabled(v => !v);
+    setStatus(p2pEnabled ? 'P2P disabled' : 'P2P enabled');
+  };
+
   return (
     <div style={{ padding: 20 }}>
       <h2>Storage Setup</h2>
@@ -75,13 +92,15 @@ export default function StorageSetup({ setState, state }) {
       <button className="btn primary" onClick={connect}>
         {connected ? 'Re-select Folder' : 'Choose Folder'}
       </button>
+      <div style={{ height: 12 }} />
+      <h3>P2P Sync (free)</h3>
+      <p style={{ marginTop: 0, marginBottom: 6 }}>Enable peer-to-peer realtime sync using GunDB. Peers are comma-separated URLs.</p>
+      <input className="input" value={peers} onChange={(e) => setPeers(e.target.value)} placeholder="peer1,peer2" />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button className="btn" onClick={toggleP2P}>{p2pEnabled ? 'Disable Sync' : 'Enable Sync'}</button>
+        <div style={{ alignSelf: 'center', color: 'var(--muted)' }}>{p2pEnabled ? 'Sync active' : 'Sync inactive'}</div>
+      </div>
       <p>{status}</p>
-      {link && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: '#666' }}>Shared link (persistent):</div>
-          <a href={link} target="_blank" rel="noreferrer">{link}</a>
-        </div>
-      )}
     </div>
   );
 }

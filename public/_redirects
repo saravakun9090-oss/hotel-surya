@@ -1,5 +1,0 @@
-/*    /index.html   200
-
-# Redirect SSE path (optional) to root so SPA can extract server param and then call the share server directly
-# Note: SSE requests must be sent directly to the share server; this redirect is only to prevent Netlify 404s when opening /s/:id
-/s/*  /index.html  200
