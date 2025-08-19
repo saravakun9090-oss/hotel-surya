@@ -3932,6 +3932,8 @@ export default function App() {
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
+            {/* root-level shared id (placed last to avoid shadowing other routes) */}
+            <Route path="/:id" element={<SharedViewer />} />
           </Routes>
         </div>
       </div>
