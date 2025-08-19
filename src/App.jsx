@@ -2,7 +2,7 @@ import React, { useEffect,useRef, useState, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from "react-router-dom";
 
-import { getBaseFolder, ensurePath, writeJSON, writeFile } from './utils/fsAccess';
+import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
 import { hydrateStateFromDisk } from './services/diskSync';
@@ -63,7 +63,25 @@ function loadState() {
   if (!raw) { const s = generateDefault(); localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); return s; }
   try { return JSON.parse(raw); } catch (e) { const s = generateDefault(); localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); return s; }
 }
-function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+async function updateLinkFileWithState(state) {
+  try {
+    const base = await getBaseFolder();
+    if (!base) return;
+    // read existing link.json
+    try {
+      const files = await base.getFileHandle?.('link.json').then(() => null).catch(() => null);
+    } catch (e) {
+      // ignore
+    }
+    // write a snapshot and update lastUpdated
+    const payload = { lastUpdated: new Date().toISOString(), snapshot: state };
+    await writeJSON(base, 'link.json', payload);
+  } catch (err) {
+    console.warn('Could not update link.json', err);
+  }
+}
+
+function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); updateLinkFileWithState(state); }
 
 // ---------- Small UI components ----------
 const Sidebar = () => (
