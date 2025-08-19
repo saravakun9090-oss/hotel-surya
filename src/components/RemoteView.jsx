@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { initGun, subscribeCollection, offCollection } from '../services/realtime';
 
-const DEFAULT_PEERS = ['https://gun-manhattan.herokuapp.com/gun'];
+const DEFAULT_PEERS = [];
 
 function pad2(n){ return String(n).padStart(2,'0'); }
 
@@ -13,7 +13,11 @@ export default function RemoteView() {
   const [checkouts, setCheckouts] = useState({});
 
   useEffect(() => {
-    initGun({ peers: DEFAULT_PEERS });
+  // allow optional peer list via URL query param `?peers=peer1,peer2`
+  const params = new URLSearchParams(window.location.search);
+  const pstr = params.get('peers') || '';
+  const peersFromUrl = pstr ? pstr.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_PEERS;
+  initGun({ peers: peersFromUrl });
 
     const onCheckin = (key, data) => setCheckins(prev => ({ ...prev, [key]: data }));
     const onRes = (key, data) => setReservations(prev => ({ ...prev, [key]: data }));
@@ -31,6 +35,7 @@ export default function RemoteView() {
       try { offCollection('checkins'); offCollection('reservations'); offCollection('rentCollections'); offCollection('expenses'); offCollection('checkouts'); } catch (e) {}
     };
   }, []);
+
 
   // helpers to compute room status from checkins/reservations
   const today = new Date().toISOString().slice(0,10);
