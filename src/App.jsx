@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { getBaseFolder, ensurePath, writeJSON, writeFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
+import { putDoc } from './services/realtime';
 const RemoteView = React.lazy(() => import('./components/RemoteView'));
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
@@ -680,6 +681,7 @@ function CheckIn({ state, setState, locationState }) {
                     const updatedRent = { ...rentData, room: newRooms };
                     try {
                       await writeJSON(dateHandle, rentFileName, updatedRent);
+                        try { putDoc('rentCollections', updatedRent.id || `rent-${Date.now()}`, { ...updatedRent, id: updatedRent.id || `rent-${Date.now()}` }); } catch (e) {}
                     } catch (err) {
                       console.warn('Failed to update rent file', rentFileName, err);
                     }
@@ -1166,6 +1168,10 @@ function CheckIn({ state, setState, locationState }) {
   const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
   const roomsKey = roomsArr.join('_');
   await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
+  try {
+    // Publish to realtime network if available
+    try { putDoc('checkins', guest.id || `checkin-${Date.now()}`, { ...guest, id: guest.id || `checkin-${Date.now()}` }); } catch (e) { /* ignore */ }
+  } catch (e) { }
 
     const year = String(now.getFullYear());
     const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
@@ -1886,6 +1892,7 @@ function CheckOut({ state, setState }) {
     const roomsKey = rooms.join('_');
     const checkoutFileName = `checkout-${safeName}-${roomsKey}-${checkInDate}.json`;
     await writeJSON(checkoutDir, checkoutFileName, data);
+  try { putDoc('checkouts', data.id || `checkout-${Date.now()}`, { ...data, id: data.id || `checkout-${Date.now()}` }); } catch (e) {}
 
     await checkinDir.removeEntry(fileName);
   }
@@ -2428,6 +2435,7 @@ async function persistReservation(res) {
     const safe = String(res.name).replace(/[^\w\-]+/g, '_'); // sanitize filename
     await writeJSON(dir, `reservation-${res.room}-${safe}.json`, res);
     console.log("Reservation saved to disk:", res);
+  try { putDoc('reservations', res.id || `reservation-${Date.now()}`, { ...res, id: res.id || `reservation-${Date.now()}` }); } catch (e) {}
   } catch (err) {
     console.error("Failed to save reservation to disk:", err);
   }
@@ -2445,6 +2453,7 @@ async function deleteReservationFile(date, room, name) {
     const safe = String(name).replace(/[^\w\-]+/g, '_'); // same filename sanitization
     await dir.removeEntry(`reservation-${room}-${safe}.json`);
     console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
+  try { putDoc('reservations', `reservation-${room}-${safe}`, { id: `reservation-${room}-${safe}`, _deleted: true, updatedAt: new Date().toISOString() }); } catch (e) {}
   } catch (err) {
     console.warn("Failed to delete reservation file from disk:", err);
   }
@@ -2752,6 +2761,7 @@ function RentPayments() {
           const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
           const updated = { ...row, days: Number(editDays), amount: Number(editAmount), mode: editMode };
           await writeJSON(dir, row._fileName, updated);
+          try { putDoc('rentCollections', updated.id || `rent-${Date.now()}`, { ...updated, id: updated.id || `rent-${Date.now()}` }); } catch (e) {}
           showSuccess("✅ Entry updated successfully");
           setEditingRow(null);
           loadAll();
@@ -3286,6 +3296,7 @@ const [expMsg, setExpMsg] = useState("");
     };
 
     await writeJSON(expDir, fileName, expenseData);
+  try { putDoc('expenses', expenseData.id || `exp-${Date.now()}`, { ...expenseData, id: expenseData.id || `exp-${Date.now()}` }); } catch (e) {}
     // 🔹 Refresh today's lists instantly
     await loadTodayData();
     
