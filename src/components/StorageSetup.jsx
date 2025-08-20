@@ -1,106 +1,117 @@
 import React, { useState, useEffect } from 'react';
 import { chooseBaseFolder, getBaseFolder } from '../utils/fsAccess';
 import { initFullFolderTree } from '../utils/initStructure';
-import { hydrateStateFromDisk, upsertDiskDoc } from '../services/diskSync';
-import { initGun, subscribeCollection, putDoc, offCollection } from '../services/realtime';
+import { load, save, ping } from '../services/storageAdapter';
 
 export default function StorageSetup({ setState, state }) {
-  const [status, setStatus] = useState('Checking...');
-  const [connected, setConnected] = useState(false);
-  const [p2pEnabled, setP2pEnabled] = useState(false);
-  const [peers, setPeers] = useState('https://gun-manhattan.herokuapp.com/gun'); // default public peer for testing
+  const [status, setStatus] = useState('Idle');
+  const [connecting, setConnecting] = useState(false);
 
+  // Single connect flow: select base folder, init folders, hydrate local, then try Mongo and merge
+  const connectAll = async () => {
+    setConnecting(true);
+    setStatus('Selecting base folder...');
+    try {
+      const base = await chooseBaseFolder();
+      await initFullFolderTree(base);
+      setStatus('Loading from local disk...');
+      const localState = await load('local', state).catch(() => null);
+      if (localState) setState(localState);
+
+      setStatus('Connecting to Mongo...');
+      const ok = await ping('mongo');
+      if (ok) {
+        setStatus('Loading from Mongo and merging...');
+        try {
+          const mongoState = await load('mongo', localState || state).catch(() => null);
+          // Merge simple: prefer Mongo guests/reservations but preserve local rates/floors where present
+          if (mongoState) {
+            const merged = { ...mongoState };
+            // preserve local floor rates if available
+            if (localState?.floors) {
+              for (const fnum of Object.keys(merged.floors || {})) {
+                merged.floors[fnum] = merged.floors[fnum].map(r => {
+                  const old = localState.floors[fnum]?.find(x => x.number === r.number);
+                  return old ? { ...r, rate: old.rate ?? r.rate } : r;
+                });
+              }
+            }
+            setState(merged);
+          }
+          setStatus('Connected to Mongo and local storage');
+        } catch (e) {
+          console.warn('Mongo load failed', e);
+          setStatus('Local loaded; Mongo connection failed');
+        }
+      } else {
+        setStatus('Local loaded; Mongo not available');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus(`Error: ${err.message}`);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  // Auto-connect on mount if base folder already stored or previously connected
   useEffect(() => {
     (async () => {
-      const base = await getBaseFolder();
-      if (base) {
-        setConnected(true);
-        setStatus('Connected');
-        const synced = await hydrateStateFromDisk(state);
-        if (synced) setState(synced);
-      } else {
-        setConnected(false);
-        setStatus('Not connected');
+      try {
+        setStatus('Checking storage...');
+        const base = await getBaseFolder();
+        const prev = localStorage.getItem('storage_connected');
+        if (base || prev) {
+          setStatus('Found previous storage. Loading...');
+          // hydrate from disk without prompting
+          const localState = await load('local', state).catch(() => null);
+          if (localState) setState(localState);
+
+          // attempt mongo
+          setStatus('Checking Mongo connection...');
+          const ok = await ping('mongo');
+          if (ok) {
+            try {
+              const mongoState = await load('mongo', localState || state).catch(() => null);
+              if (mongoState) {
+                const merged = { ...mongoState };
+                if (localState?.floors) {
+                  for (const fnum of Object.keys(merged.floors || {})) {
+                    merged.floors[fnum] = merged.floors[fnum].map(r => {
+                      const old = localState.floors[fnum]?.find(x => x.number === r.number);
+                      return old ? { ...r, rate: old.rate ?? r.rate } : r;
+                    });
+                  }
+                }
+                setState(merged);
+              }
+              setStatus('Connected to Mongo and local storage');
+              localStorage.setItem('storage_connected', '1');
+            } catch (e) {
+              console.warn('Mongo auto-load failed', e);
+              setStatus('Local loaded; Mongo connection failed');
+            }
+          } else {
+            setStatus('Local loaded; Mongo not available');
+          }
+        } else {
+          setStatus('Not connected');
+        }
+      } catch (e) {
+        console.warn('Auto-connect failed', e);
+        setStatus('Idle');
       }
     })();
   }, []);
 
-  useEffect(() => {
-    if (!p2pEnabled) return;
-    // initialize gun with peers
-    const peerList = peers.split(',').map(p => p.trim()).filter(Boolean);
-    initGun({ peers: peerList });
-
-    // subscribe to relevant collections
-    const applyRemote = async (collection, key, data) => {
-      try {
-        // merge into local state depending on collection
-        if (collection === 'checkins') {
-          // write to disk and optionally merge into in-memory state by rehydrating
-          await upsertDiskDoc('Checkins', { ...data, id: key });
-        } else if (collection === 'reservations') {
-          await upsertDiskDoc('Reservations', { ...data, id: key });
-        } else {
-          // generic
-          await upsertDiskDoc(collection, { ...data, id: key });
-        }
-
-        // re-hydrate from disk to get canonical state and set it
-        const newState = await hydrateStateFromDisk(state);
-        if (newState) setState(newState);
-      } catch (err) {
-        console.warn('applyRemote error', err);
-      }
-    };
-
-    // wrapper for subscribeCollection to capture name
-    const subCheckin = (key, data) => applyRemote('checkins', key, data);
-    const subRes = (key, data) => applyRemote('reservations', key, data);
-
-    subscribeCollection('checkins', (key, data) => subCheckin(key, data));
-    subscribeCollection('reservations', (key, data) => subRes(key, data));
-
-    return () => {
-      try { offCollection('checkins'); offCollection('reservations'); } catch (e) {}
-    };
-  }, [p2pEnabled, peers]);
-
-  const connect = async () => {
-    try {
-      const base = await chooseBaseFolder();
-      await initFullFolderTree(base);
-      setConnected(true);
-      setStatus('Connected & folders created');
-
-      const synced = await hydrateStateFromDisk(state);
-      if (synced) setState(synced);
-    } catch (err) {
-      console.error(err);
-      setStatus(`Error: ${err.message}`);
-    }
-  };
-
-  const toggleP2P = () => {
-    setP2pEnabled(v => !v);
-    setStatus(p2pEnabled ? 'P2P disabled' : 'P2P enabled');
-  };
-
   return (
     <div style={{ padding: 20 }}>
       <h2>Storage Setup</h2>
-      <p>Choose your base folder. If files exist, data will be loaded from disk.</p>
-      <button className="btn primary" onClick={connect}>
-        {connected ? 'Re-select Folder' : 'Choose Folder'}
+      <p>Connect local storage and MongoDB with one button. The app will save locally and upload to Mongo automatically.</p>
+      <button className="btn primary" onClick={connectAll} disabled={connecting}>
+        {connecting ? 'Connecting...' : 'Connect Storage'}
       </button>
-      <div style={{ height: 12 }} />
-      <h3>P2P Sync (free)</h3>
-      <p style={{ marginTop: 0, marginBottom: 6 }}>Enable peer-to-peer realtime sync using GunDB. Peers are comma-separated URLs.</p>
-      <input className="input" value={peers} onChange={(e) => setPeers(e.target.value)} placeholder="peer1,peer2" />
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <button className="btn" onClick={toggleP2P}>{p2pEnabled ? 'Disable Sync' : 'Enable Sync'}</button>
-        <div style={{ alignSelf: 'center', color: 'var(--muted)' }}>{p2pEnabled ? 'Sync active' : 'Sync inactive'}</div>
-      </div>
-      <p>{status}</p>
+      <p style={{ marginTop: 12 }}>{status}</p>
     </div>
   );
 }

@@ -2,11 +2,9 @@ import React, { useEffect,useRef, useState, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from "react-router-dom";
 
-import { getBaseFolder, ensurePath, writeJSON, writeFile } from './utils/fsAccess';
+import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
-import { putDoc } from './services/realtime';
-const RemoteView = React.lazy(() => import('./components/RemoteView'));
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
 
@@ -681,7 +679,6 @@ function CheckIn({ state, setState, locationState }) {
                     const updatedRent = { ...rentData, room: newRooms };
                     try {
                       await writeJSON(dateHandle, rentFileName, updatedRent);
-                        try { putDoc('rentCollections', updatedRent.id || `rent-${Date.now()}`, { ...updatedRent, id: updatedRent.id || `rent-${Date.now()}` }); } catch (e) {}
                     } catch (err) {
                       console.warn('Failed to update rent file', rentFileName, err);
                     }
@@ -738,8 +735,48 @@ function CheckIn({ state, setState, locationState }) {
       setPreviewFileName(foundName);
       setPreviewUrl(url);
       setShowPreviewModal(true);
+      return;
     } catch (err) {
       console.warn('Preview open failed', err);
+      // fallback: try remote link.json mapping
+    }
+
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      // read link.json at root
+      try {
+        const fh = await base.getFileHandle('link.json');
+        const existing = await readJSONFile(fh);
+        const safe = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        // find any mapping where filename includes safe
+        for (const [k, v] of Object.entries(existing || {})) {
+          if (k.toLowerCase().includes(safe)) {
+            // fetch remote file as blob
+            const API_BASE = window.__MONGO_API_BASE__ || '/api';
+            const baseUrl = API_BASE.startsWith('http') ? API_BASE.replace(/\/api$/, '') : '';
+            const url = (baseUrl || '') + `/api/download/${v.id}`;
+            try {
+              const r = await fetch(url);
+              if (!r.ok) throw new Error('Download failed');
+              const blob = await r.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              setPreviewFileName(k);
+              setPreviewUrl(objectUrl);
+              setShowPreviewModal(true);
+              return;
+            } catch (e) {
+              console.warn('Remote preview failed', e);
+            }
+          }
+        }
+      } catch (e) {
+        // no link.json or read failed
+      }
+      alert('Failed to open scanned document');
+      return;
+    } catch (err2) {
+      console.warn('Remote fallback failed', err2);
       alert('Failed to open scanned document');
     }
   };
@@ -939,6 +976,17 @@ function CheckIn({ state, setState, locationState }) {
 
       try {
         await writeFile(scansDir, newFileName, fileToSave);
+        // also try to upload to server and store link metadata at root
+        try {
+          const { uploadFileToServer } = await import('./services/upload');
+          const resp = await uploadFileToServer(fileToSave);
+          // write link.json at root with mapping
+          try {
+            await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() });
+          } catch (e) { /* ignore link write failures */ }
+        } catch (e) {
+          console.warn('Upload failed or not configured', e);
+        }
       } catch (e) {
         console.error('Failed writing scan file', e);
         return alert('Failed to save scanned file: ' + (e?.message || String(e)));
@@ -977,6 +1025,12 @@ function CheckIn({ state, setState, locationState }) {
   const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
 
   await writeFile(scansDir, newFileName, file);
+  // attempt upload
+  try {
+    const { uploadFileToServer } = await import('./services/upload');
+    const resp = await uploadFileToServer(file);
+    try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
+  } catch (e) { console.warn('Upload failed', e); }
 
       // delete temp entry (best-effort)
       try {
@@ -1168,10 +1222,6 @@ function CheckIn({ state, setState, locationState }) {
   const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
   const roomsKey = roomsArr.join('_');
   await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
-  try {
-    // Publish to realtime network if available
-    try { putDoc('checkins', guest.id || `checkin-${Date.now()}`, { ...guest, id: guest.id || `checkin-${Date.now()}` }); } catch (e) { /* ignore */ }
-  } catch (e) { }
 
     const year = String(now.getFullYear());
     const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
@@ -1184,6 +1234,12 @@ function CheckIn({ state, setState, locationState }) {
       const newFileName = `${safeName}-${guest.room}-${todayISOstr}.${ext}`;
       const file = await scanFile.fileHandle.getFile();
       await writeFile(scansDir, newFileName, file);
+      // attempt upload to server for remote access
+      try {
+        const { uploadFileToServer } = await import('./services/upload');
+        const resp = await uploadFileToServer(file);
+        try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
+      } catch (e) { console.warn('Upload failed', e); }
       console.log("Reused old scan saved:", newFileName);
       return;
     }
@@ -1892,7 +1948,6 @@ function CheckOut({ state, setState }) {
     const roomsKey = rooms.join('_');
     const checkoutFileName = `checkout-${safeName}-${roomsKey}-${checkInDate}.json`;
     await writeJSON(checkoutDir, checkoutFileName, data);
-  try { putDoc('checkouts', data.id || `checkout-${Date.now()}`, { ...data, id: data.id || `checkout-${Date.now()}` }); } catch (e) {}
 
     await checkinDir.removeEntry(fileName);
   }
@@ -2435,7 +2490,6 @@ async function persistReservation(res) {
     const safe = String(res.name).replace(/[^\w\-]+/g, '_'); // sanitize filename
     await writeJSON(dir, `reservation-${res.room}-${safe}.json`, res);
     console.log("Reservation saved to disk:", res);
-  try { putDoc('reservations', res.id || `reservation-${Date.now()}`, { ...res, id: res.id || `reservation-${Date.now()}` }); } catch (e) {}
   } catch (err) {
     console.error("Failed to save reservation to disk:", err);
   }
@@ -2453,7 +2507,6 @@ async function deleteReservationFile(date, room, name) {
     const safe = String(name).replace(/[^\w\-]+/g, '_'); // same filename sanitization
     await dir.removeEntry(`reservation-${room}-${safe}.json`);
     console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
-  try { putDoc('reservations', `reservation-${room}-${safe}`, { id: `reservation-${room}-${safe}`, _deleted: true, updatedAt: new Date().toISOString() }); } catch (e) {}
   } catch (err) {
     console.warn("Failed to delete reservation file from disk:", err);
   }
@@ -2761,7 +2814,6 @@ function RentPayments() {
           const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
           const updated = { ...row, days: Number(editDays), amount: Number(editAmount), mode: editMode };
           await writeJSON(dir, row._fileName, updated);
-          try { putDoc('rentCollections', updated.id || `rent-${Date.now()}`, { ...updated, id: updated.id || `rent-${Date.now()}` }); } catch (e) {}
           showSuccess("✅ Entry updated successfully");
           setEditingRow(null);
           loadAll();
@@ -3296,7 +3348,6 @@ const [expMsg, setExpMsg] = useState("");
     };
 
     await writeJSON(expDir, fileName, expenseData);
-  try { putDoc('expenses', expenseData.id || `exp-${Date.now()}`, { ...expenseData, id: expenseData.id || `exp-${Date.now()}` }); } catch (e) {}
     // 🔹 Refresh today's lists instantly
     await loadTodayData();
     
@@ -3925,7 +3976,6 @@ export default function App() {
             <Route path="/checkout" element={<CheckOut state={state} setState={setState} />} />
             <Route path="/reservations" element={<Reservations state={state} setState={setState} />} />
             <Route path="/storage" element={<StorageSetup setState={setState} state={state} />} />
-            <Route path="/remoteview" element={<React.Suspense fallback={<div>Loading...</div>}><RemoteView /></React.Suspense>} />
             <Route path="/accounts" element={<Accounts state={state} setState={setState} />} />
             <Route path="/analysis" element={<Analysis />} />
             <Route path="/rent-payments" element={<RentPayments />} /> 

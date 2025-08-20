@@ -1,4 +1,4 @@
-import { getBaseFolder, ensureDir, listDirs, listFiles, readJSONFile } from '../utils/fsAccess';
+import { getBaseFolder, ensureDir, listDirs, listFiles, readJSONFile, writeJSON } from '../utils/fsAccess';
 
 function makeEmptyFloors() {
   const floors = {};
@@ -109,28 +109,15 @@ export async function hydrateStateFromDisk(currentState) {
   return next;
 }
 
-// Upsert a record to disk folders (Checkins or Reservations). This will create the
-// necessary date folder and write a JSON file named by id (or generated) so disk
-// storage mirrors remote updates.
-export async function upsertDiskDoc(collection, doc) {
+export async function saveStateToDisk(state) {
+  const base = await getBaseFolder();
+  if (!base) throw new Error('No base folder selected');
   try {
-    const base = await getBaseFolder();
-    if (!base) return null;
-    // collection -> folder mapping
-    const colFolder = collection === 'reservations' ? 'Reservations' : collection === 'checkins' ? 'Checkins' : collection;
-    const root = await ensureDir(base, colFolder);
-
-    // determine date folder name (for Checkins/Reservations we expect a date)
-    const dateStr = doc.date || (doc.checkIn ? doc.checkIn.slice(0, 10) : (new Date()).toISOString().slice(0,10));
-    const dayDir = await ensureDir(root, dateStr);
-
-    const filename = (doc.id || `${collection}_${Date.now()}`).toString() + '.json';
-    // write using writeJSON helper from fsAccess (import lazily to avoid cycle)
-    const { writeJSON } = await import('../utils/fsAccess');
-    await writeJSON(dayDir, filename, doc);
-    return { ok: true, path: `${colFolder}/${dateStr}/${filename}` };
+    // write a simple snapshot file at the root so the app can reload quickly
+    await writeJSON(base, 'app_state.json', { state, updatedAt: new Date().toISOString() });
+    return true;
   } catch (err) {
-    console.warn('upsertDiskDoc error', err);
-    return { ok: false, error: err.message };
+    console.error('Failed to save state to disk', err);
+    throw err;
   }
 }

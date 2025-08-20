@@ -10,6 +10,14 @@ host: true, // listen on all interfaces
 port: 3000, // or your port
 allowedHosts: true, // allow all external hosts (ngrok, etc.)
 strictPort: false, // optional
-},
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api/, '/api')
+      }
+    }
+  },
 base: '/',
 });
