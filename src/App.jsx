@@ -70,25 +70,8 @@ function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(sta
 const Sidebar = () => (
   <div className="sidebar">
     <div className="logo">🏨 HOTEL SURYA</div>
-    <div className="subtitle">Manage check-ins, checkouts & reservations</div>
-    <nav className="nav">
-      <Link to="/">Dashboard</Link>
-      <Link to="/checkin">Check-in</Link>
-      <Link to="/checkout">Check-out</Link>
-      <Link to="/reservations">Reservations</Link>
-      <Link to="/floors">Floors</Link>
-      <Link to="/storage">Storage</Link>
-      <Link to="/accounts" className="btn">Accounts</Link>
-      <Link to="/analysis">Analysis</Link>
-      
-
-    </nav>
-    <div style={{ flex: 1 }} />
-    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)' }}>Theme</div>
-    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-      <div style={{ background: 'var(--cream)', padding: 8, borderRadius: 8 }}>Accent</div>
-      <div style={{ background: 'var(--deep)', padding: 8, borderRadius: 8, color: 'white' }}>Primary</div>
-    </div>
+    <div className="subtitle">Live status</div>
+    {/* navigation intentionally removed for live-update public page */}
   </div>
 );
 
