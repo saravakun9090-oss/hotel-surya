@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
 import StorageSetup from './components/StorageSetup';
+import LiveUpdate from './LiveUpdate';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
 
@@ -3970,6 +3971,7 @@ export default function App() {
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
+            <Route path="/liveupdate" element={<LiveUpdate />} />
             <Route path="/floors" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/floors/:floor" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/checkin" element={<CheckIn state={state} setState={setState} locationState={{}} />} />
