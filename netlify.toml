@@ -1,0 +1,19 @@
+# Netlify config - sets build env for the frontend during Netlify builds
+# WARNING: This file contains a placeholder URL. Do NOT commit real secrets or credentials here.
+# Replace the placeholder with your real API URL or set the environment variable in the Netlify UI instead.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Set the public backend API base that the frontend will call at runtime (build-time variable)
+  # Example: VITE_MONGO_API_BASE = "https://api.example.com/api"
+  VITE_MONGO_API_BASE = "https://your-backend.example.com/api"
+
+# Optional: you can add redirects here if you later serve API from the same domain
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://api.example.com/:splat"
+#   status = 200
+#   force = false
