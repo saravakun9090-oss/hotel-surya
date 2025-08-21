@@ -1,6 +1,10 @@
 // src/services/mongoSync.js
 // Small client to interact with a backend that proxies MongoDB (mongosbb)
-const API_BASE = window.__MONGO_API_BASE__ || '/api';
+// Prefer a build-time variable (VITE_MONGO_API_BASE). In dev fall back to '/api'.
+const BUILD_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+  ? import.meta.env.VITE_MONGO_API_BASE
+  : null;
+const API_BASE = BUILD_BASE || (window.__MONGO_API_BASE__ || ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) ? '/api' : null));
 
 async function expectJson(res) {
   const contentType = res.headers.get('content-type') || '';
@@ -13,6 +17,7 @@ async function expectJson(res) {
 }
 
 export async function loadStateFromMongo() {
+  if (!API_BASE) throw new Error('No remote API configured (API_BASE is null)');
   const res = await fetch(`${API_BASE}/state`);
   if (!res.ok) {
     const t = await res.text();
@@ -24,6 +29,7 @@ export async function loadStateFromMongo() {
 }
 
 export async function saveStateToMongo(state) {
+  if (!API_BASE) throw new Error('No remote API configured (API_BASE is null)');
   const res = await fetch(`${API_BASE}/state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -39,6 +45,7 @@ export async function saveStateToMongo(state) {
 
 export async function testConnection() {
   try {
+    if (!API_BASE) return false;
     const res = await fetch(`${API_BASE}/ping`);
     if (!res.ok) {
       const t = await res.text();

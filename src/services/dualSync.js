@@ -1,6 +1,13 @@
 // src/services/dualSync.js
 import { loadStateFromMongo, saveStateToMongo, testConnection } from './mongoSync';
 
+// detect API presence from mongoSync module (it exposes API_BASE indirectly by behavior)
+let HAS_API = true;
+try {
+  // testConnection will return false if no API configured
+  testConnection().then(ok => { HAS_API = ok; }).catch(() => { HAS_API = false; });
+} catch (e) { HAS_API = false; }
+
 const OUTBOX_KEY = 'remote_outbox_state';
 const FLUSH_INTERVAL = 5000; // try flush every 5s
 
@@ -14,14 +21,16 @@ function clearOutbox() { localStorage.removeItem(OUTBOX_KEY); }
 
 // Attempt to save current state to remote. On failure, store in outbox (only last state kept).
 export async function saveAll(state) {
+  if (!HAS_API) {
+    // No remote API configured — skip remote write and don't queue
+    return { ok: false, error: 'no-api-configured' };
+  }
   try {
     const res = await saveStateToMongo(state);
-    // success: clear outbox because latest remote state is stored
     clearOutbox();
     return { ok: true, res };
   } catch (e) {
     console.warn('saveAll: failed to save to mongo, queuing outbox', e?.message || e);
-    // store only latest state to outbox (we don't need history)
     writeOutbox({ state, ts: new Date().toISOString() });
     return { ok: false, error: String(e) };
   }
