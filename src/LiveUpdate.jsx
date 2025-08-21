@@ -1,110 +1,175 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { load } from './services/storageAdapter';
+import React, { useEffect, useState, useMemo } from 'react';
 
-function SmallRoom({ r }) {
-  const bg = r.status === 'occupied' ? 'var(--accent)' : r.status === 'reserved' ? '#ffd580' : '#fff';
-  return (
-    <div className="card" style={{ padding: 8, borderRadius: 8, background: bg, textAlign: 'center' }}>
-      <div style={{ fontWeight: 800 }}>{r.number}</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{r.status}</div>
-    </div>
-  );
-}
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+  ? import.meta.env.VITE_MONGO_API_BASE
+  : (window.__MONGO_API_BASE__ || '/api');
 
-export default function LiveUpdate() {
-  const [state, setState] = useState(null);
-  const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [connected, setConnected] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const fetchState = useCallback(async (opts = {}) => {
-    setLoading(true);
-    try {
-      const s = await load('mongo', null);
-      setState(s);
-      setConnected(true);
-    } catch (e) {
-      setConnected(false);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+function usePolling(url, interval = 2000) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let mounted = true;
-    fetchState();
-    const id = setInterval(() => { if (mounted) fetchState(); }, 3000);
-    return () => { mounted = false; clearInterval(id); };
-  }, [fetchState]);
+    let timer = null;
 
-  const floors = state?.floors || {};
+    const fetchOnce = async () => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(await res.text());
+        const json = await res.json();
+        if (!mounted) return;
+        setData(json.state || null);
+        setLoading(false);
+        setError(null);
+      } catch (e) {
+        if (!mounted) return;
+        setError(String(e));
+        setLoading(false);
+      }
+    };
 
-  // button actions: quick filters
-  const onCheckout = () => setFilter('occupied');
-  const onReservations = () => setFilter('reserved');
-  const onRentPayments = () => setFilter('all');
-  const onExpenses = () => setFilter('all');
+    fetchOnce();
+    timer = setInterval(fetchOnce, interval);
+
+    return () => { mounted = false; if (timer) clearInterval(timer); };
+  }, [url, interval]);
+
+  return { data, loading, error };
+}
+
+const PillButton = ({ active, onClick, children }) => (
+  <button onClick={onClick} className={`px-3 py-1 rounded-md text-sm ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
+    {children}
+  </button>
+);
+
+const RoomBox = ({ room, onClick }) => (
+  <div onClick={() => onClick(room)} className={`border rounded p-2 mb-2 cursor-pointer flex items-center justify-between ${room.status === 'occupied' ? 'bg-red-50' : room.status === 'reserved' ? 'bg-yellow-50' : 'bg-green-50'}`}>
+    <div>
+      <div className="font-medium">{room.number}</div>
+      <div className="text-xs text-gray-600">{room.status}</div>
+    </div>
+    <div className="text-right text-xs">
+      {room.guest ? <div>{room.guest.name}</div> : <div className="text-gray-500">—</div>}
+    </div>
+  </div>
+);
+
+export default function LiveUpdate() {
+  const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
+  const [view, setView] = useState('checkout'); // checkout | reservations | rentpayment | expenses
+  const [search, setSearch] = useState('');
+
+  const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
+
+  const allRooms = useMemo(() => {
+    const arr = [];
+    for (const fl of Object.values(floors)) {
+      for (const r of fl) arr.push(r);
+    }
+    return arr.sort((a,b)=>a.number-b.number);
+  }, [floors]);
+
+  const filteredRooms = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    if (!s) return allRooms;
+    return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
+  }, [allRooms, search]);
+
+  const rightContent = () => {
+    if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
+    if (view === 'reservations') {
+      const res = remoteState.reservations || [];
+      const list = res.filter(r => (r.name || '').toLowerCase().includes(search.toLowerCase()));
+      return (
+        <div>
+          <div className="text-sm text-gray-600 mb-2">Reservations</div>
+          {list.map((r, i) => (
+            <div key={i} className="p-2 border-b">{r.date} — {r.room} — {r.name}</div>
+          ))}
+          {list.length===0 && <div className="p-2 text-sm text-gray-500">No reservations</div>}
+        </div>
+      );
+    }
+
+    if (view === 'rentpayment') {
+      const pays = remoteState.rentPayments || remoteState.rent_payments || [];
+      const list = pays.filter(p => JSON.stringify(p).toLowerCase().includes(search.toLowerCase()));
+      return (
+        <div>
+          <div className="text-sm text-gray-600 mb-2">Rent Payments</div>
+          {list.map((p, i) => (
+            <div key={i} className="p-2 border-b">{p.date || p.month} — {p.room} — {p.amount}</div>
+          ))}
+          {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
+        </div>
+      );
+    }
+
+    if (view === 'expenses') {
+      const ex = remoteState.expenses || [];
+      const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
+      return (
+        <div>
+          <div className="text-sm text-gray-600 mb-2">Expenses</div>
+          {list.map((e, i) => (
+            <div key={i} className="p-2 border-b">{e.date} — {e.category || e.note} — {e.amount}</div>
+          ))}
+          {list.length===0 && <div className="p-2 text-sm text-gray-500">No expenses</div>}
+        </div>
+      );
+    }
+
+    // default: checkout view
+    const occupied = allRooms.filter(r => r.status === 'occupied');
+    const list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
+    return (
+      <div>
+        <div className="text-sm text-gray-600 mb-2">Checkouts / Active Stays</div>
+        {list.map((r) => (
+          <div key={r.number} className="p-2 border-b">
+            <div className="font-medium">Room {r.number} — {r.guest?.name}</div>
+            <div className="text-xs text-gray-600">Contact: {r.guest?.contact || '—'} • Rate: {r.guest?.rate || '—'}</div>
+          </div>
+        ))}
+        {list.length===0 && <div className="p-2 text-sm text-gray-500">No active checkouts</div>}
+      </div>
+    );
+  };
 
   return (
-    <div style={{ padding: 12, fontFamily: 'system-ui, Arial' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>Live Update</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn" onClick={onCheckout}>Checkout</button>
-            <button className="btn" onClick={onReservations}>Reservations</button>
-            <button className="btn" onClick={onRentPayments}>Rent payments</button>
-            <button className="btn" onClick={onExpenses}>Expenses</button>
+    <div className="p-4 max-w-5xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
+        <div className="flex-1">
+          <div className="flex flex-wrap gap-2 mb-2">
+            <PillButton active={view==='checkout'} onClick={() => setView('checkout')}>Checkout</PillButton>
+            <PillButton active={view==='reservations'} onClick={() => setView('reservations')}>Reservations</PillButton>
+            <PillButton active={view==='rentpayment'} onClick={() => setView('rentpayment')}>RentPayment</PillButton>
+            <PillButton active={view==='expenses'} onClick={() => setView('expenses')}>Expenses</PillButton>
           </div>
         </div>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input placeholder="Search by guest" value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ padding: 6, borderRadius: 6 }} />
-            <select value={filter} onChange={e => setFilter(e.target.value)} className="input" style={{ padding: 6, borderRadius: 6 }}>
-              <option value="all">All</option>
-              <option value="occupied">Occupied</option>
-              <option value="reserved">Reserved</option>
-              <option value="free">Free</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ fontSize: 12, color: connected ? 'green' : 'red' }}>{connected ? 'Mongo: connected' : 'Mongo: disconnected'}</div>
-            <button className="btn" onClick={() => fetchState()}>Refresh</button>
-          </div>
+        <div className="w-full md:w-48">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search" className="w-full px-2 py-1 border rounded text-sm" />
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ flex: '0 0 320px' }}>
-          {Object.keys(floors).length === 0 && (
-            <div style={{ color: 'var(--muted)' }}>{loading ? 'Loading...' : 'No floors found'}</div>
-          )}
-          {Object.keys(floors).map(fn => (
-            <div key={fn} style={{ marginBottom: 8 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Floor {fn}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-                {floors[fn].filter(r => filter === 'all' ? true : r.status === filter).map(r => (
-                  <SmallRoom key={r.number} r={r} />
-                ))}
-              </div>
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="w-full md:w-80">
+          <div className="mb-2 text-sm text-gray-600">Rooms</div>
+          <div className="max-h-[70vh] overflow-auto">
+            {loading && <div className="text-sm text-gray-500">Loading...</div>}
+            {error && <div className="text-sm text-red-500">{error}</div>}
+            <div className="grid grid-cols-2 md:grid-cols-1 gap-2">
+              {filteredRooms.map(r => <RoomBox key={r.number} room={r} onClick={() => {}} />)}
             </div>
-          ))}
+            {filteredRooms.length===0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
+          </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Current Check-ins</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {(Object.values(floors).flat().filter(r => r.status === 'occupied' && (search ? String(r.guest?.name || '').toLowerCase().includes(search.toLowerCase()) : true))).map(r => (
-              <div key={r.number} className="card" style={{ padding: 8, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 800 }}>{r.guest?.name || 'Guest'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {r.number} • {r.guest?.contact || ''}</div>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{new Date(r.guest?.checkIn || Date.now()).toLocaleString()}</div>
-              </div>
-            ))}
+        <div className="flex-1">
+          <div className="border rounded p-3 max-h-[75vh] overflow-auto">
+            {rightContent()}
           </div>
         </div>
       </div>

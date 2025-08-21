@@ -70,8 +70,25 @@ function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(sta
 const Sidebar = () => (
   <div className="sidebar">
     <div className="logo">🏨 HOTEL SURYA</div>
-    <div className="subtitle">Live status</div>
-    {/* navigation intentionally removed for live-update public page */}
+    <div className="subtitle">Manage check-ins, checkouts & reservations</div>
+    <nav className="nav">
+      <Link to="/">Dashboard</Link>
+      <Link to="/checkin">Check-in</Link>
+      <Link to="/checkout">Check-out</Link>
+      <Link to="/reservations">Reservations</Link>
+      <Link to="/floors">Floors</Link>
+      <Link to="/storage">Storage</Link>
+      <Link to="/accounts" className="btn">Accounts</Link>
+      <Link to="/analysis">Analysis</Link>
+      
+
+    </nav>
+    <div style={{ flex: 1 }} />
+    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)' }}>Theme</div>
+    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div style={{ background: 'var(--cream)', padding: 8, borderRadius: 8 }}>Accent</div>
+      <div style={{ background: 'var(--deep)', padding: 8, borderRadius: 8, color: 'white' }}>Primary</div>
+    </div>
   </div>
 );
 
@@ -3936,7 +3953,16 @@ function KPI({ title, value, color }) {
 // ---------- App ----------
 export default function App() {
   const [state, setState] = useState(loadState());
-  useEffect(() => { saveState(state); }, [state]);
+  useEffect(() => { 
+    saveState(state); 
+    // attempt to write to remote (non-blocking)
+    (async () => {
+      try {
+        const { saveAll } = await import('./services/dualSync');
+        saveAll(state).catch(e => console.warn('remote save failed', e));
+      } catch (e) { console.warn('dualSync import failed', e); }
+    })();
+  }, [state]);
 
   useEffect(() => {
   (async () => {
@@ -3954,7 +3980,6 @@ export default function App() {
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
-            <Route path="/liveupdate" element={<LiveUpdate />} />
             <Route path="/floors" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/floors/:floor" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/checkin" element={<CheckIn state={state} setState={setState} locationState={{}} />} />
@@ -3966,6 +3991,7 @@ export default function App() {
             <Route path="/rent-payments" element={<RentPayments />} /> 
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
+            <Route path="/liveupdate" element={<LiveUpdate />} />
           </Routes>
         </div>
       </div>

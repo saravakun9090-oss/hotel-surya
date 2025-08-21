@@ -24,6 +24,10 @@ async function initDb() {
     console.warn('MONGO_URI not set - mongo endpoints will fail');
     return;
   }
+  // initialize client and collections
+  if (dbClient && dbClient.topology && dbClient.topology.isConnected && dbClient.isConnected && col && bucket) {
+    return; // already initialized (best-effort check)
+  }
   dbClient = new MongoClient(MONGO_URI);
   await dbClient.connect();
   const db = dbClient.db(DB_NAME);
@@ -35,13 +39,25 @@ async function initDb() {
   await col.updateOne({ _id: 'singleton' }, { $setOnInsert: { state: null } }, { upsert: true });
 }
 
-app.get('/api/ping', (req, res) => {
+// Ensure DB is ready for use; attempt to init if not yet connected.
+async function ensureDb() {
+  if (col && bucket) return;
+  try {
+    await initDb();
+  } catch (err) {
+    console.error('ensureDb failed', err.message || err);
+  }
+}
+
+app.get('/api/ping', async (req, res) => {
+  await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   res.json({ ok: true });
 });
 
 app.get('/api/debug', async (req, res) => {
   try {
+    await ensureDb();
     const info = { ok: !!col, db: DB_NAME, collection: COLLECTION };
     res.json(info);
   } catch (e) {
@@ -55,6 +71,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Upload scanned file to GridFS and return a public URL token
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
+    await ensureDb();
     if (!bucket) return res.status(500).json({ ok: false, msg: 'gridfs not initialized' });
     const fileBuffer = req.file.buffer;
     const filename = req.file.originalname;
@@ -74,6 +91,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 // Download by id
 app.get('/api/download/:id', async (req, res) => {
   try {
+    await ensureDb();
     if (!bucket) return res.status(500).send('GridFS not initialized');
     const id = req.params.id;
     const _id = new dbClient.bson.ObjectId(id);
@@ -86,12 +104,14 @@ app.get('/api/download/:id', async (req, res) => {
 });
 
 app.get('/api/state', async (req, res) => {
+  await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   const doc = await col.findOne({ _id: 'singleton' });
   res.json({ state: doc?.state || null });
 });
 
 app.post('/api/state', async (req, res) => {
+  await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   const { state } = req.body || {};
   await col.updateOne({ _id: 'singleton' }, { $set: { state, updatedAt: new Date() } });

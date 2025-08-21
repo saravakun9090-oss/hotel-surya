@@ -6,16 +6,10 @@ async function expectJson(res) {
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
     const text = await res.text();
-    // don't throw — return null so callers can handle missing JSON gracefully
-    console.warn('Expected JSON but server returned (truncated):', text.slice(0, 100));
-    return null;
+    console.error('Expected JSON but server returned:', text);
+    throw new Error('Server returned non-JSON response (see console)');
   }
-  try {
-    return await res.json();
-  } catch (e) {
-    console.warn('Failed parsing JSON response', e);
-    return null;
-  }
+  return await res.json();
 }
 
 export async function loadStateFromMongo() {
@@ -23,10 +17,9 @@ export async function loadStateFromMongo() {
   if (!res.ok) {
     const t = await res.text();
     console.error('Failed to fetch state from server:', res.status, t);
-    return null;
+    throw new Error('Failed to fetch state from server');
   }
   const body = await expectJson(res);
-  if (!body) return null;
   return body.state || null;
 }
 
@@ -52,10 +45,8 @@ export async function testConnection() {
       console.error('Ping failed:', res.status, t);
       return false;
     }
-  const ct = res.headers.get('content-type') || '';
-  // if ping returns HTML, treat as disconnected (dev server serving index.html)
-  if (ct.includes('text/html')) return false;
-  return true;
+    // ping may return non-json, but OK status is enough
+    return true;
   } catch (e) {
     console.error('Ping error', e);
     return false;
