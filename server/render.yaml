@@ -1,0 +1,19 @@
+# Optional Render blueprint for automatic deploy
+services:
+  - type: web
+    name: hotel-app-backend
+    env: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: true
+    repo: <your-github-repo>
+    envVars:
+      - key: MONGO_URI
+        value: <set-in-render>
+      - key: DB_NAME
+        value: hotel_surya
+      - key: COLLECTION
+        value: app_state
