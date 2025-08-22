@@ -3973,10 +3973,12 @@ export default function App() {
     }
   })();
 }, []);
+  const loc = useLocation();
   return (
     <Router>
       <div className="app-shell">
-        <Sidebar />
+        {/* Hide sidebar on liveupdate pages */}
+  {!loc.pathname.startsWith('/liveupdate') && <Sidebar />}
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
@@ -3992,6 +3994,10 @@ export default function App() {
             <Route path="/expense-payments" element={<ExpensePayments />} />
             <Route path="/checkout-list" element={<CheckoutListPage />} /> 
             <Route path="/liveupdate" element={<LiveUpdate />} />
+            <Route path="/liveupdate/reservations" element={<LiveUpdate />} />
+            <Route path="/liveupdate/checkout" element={<LiveUpdate />} />
+            <Route path="/liveupdate/rentpayment" element={<LiveUpdate />} />
+            <Route path="/liveupdate/expenses" element={<LiveUpdate />} />
           </Routes>
         </div>
       </div>

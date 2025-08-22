@@ -1,0 +1,21 @@
+import React from 'react';
+export default function CheckoutPage({ data }) {
+  const all = (data?.checkouts || data?.checkoutsList || []).slice().reverse();
+  return (
+    <div>
+      <h2 className="text-lg font-medium mb-2">Checkouts / Active Stays</h2>
+      <div className="mb-3">
+        <input placeholder="Search checkouts" className="w-full px-2 py-1 border rounded text-sm" />
+      </div>
+      <div className="space-y-2">
+        {all.map((c, i) => (
+          <div key={i} className="p-2 border rounded">
+            <div className="font-medium">Room {c.room || c.rooms} — {c.name || c.guest?.name}</div>
+            <div className="text-xs text-gray-600">Check-in: {c.checkInDate || c.checkIn} • Check-out: {c.checkOutDate || c.checkOutDate}</div>
+          </div>
+        ))}
+        {all.length===0 && <div className="text-sm text-gray-500">No checkouts</div>}
+      </div>
+    </div>
+  );
+}

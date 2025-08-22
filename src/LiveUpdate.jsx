@@ -1,4 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import ReservationsPage from './liveupdate/ReservationsPage';
+import CheckoutPage from './liveupdate/CheckoutPage';
+import RentPaymentPage from './liveupdate/RentPaymentPage';
+import ExpensesPage from './liveupdate/ExpensesPage';
 
 const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
   ? import.meta.env.VITE_MONGO_API_BASE
@@ -38,27 +43,32 @@ function usePolling(url, interval = 2000) {
   return { data, loading, error };
 }
 
-const PillButton = ({ active, onClick, children }) => (
-  <button onClick={onClick} className={`px-3 py-1 rounded-md text-sm ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
+const PillButton = ({ to, active, children }) => (
+  <Link to={to} className={`px-3 py-1 rounded-md text-sm ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
     {children}
-  </button>
+  </Link>
 );
 
 const RoomBox = ({ room, onClick }) => (
-  <div onClick={() => onClick(room)} className={`border rounded p-2 mb-2 cursor-pointer flex items-center justify-between ${room.status === 'occupied' ? 'bg-red-50' : room.status === 'reserved' ? 'bg-yellow-50' : 'bg-green-50'}`}>
+  <div onClick={() => onClick(room)} className={`border rounded-md p-3 mb-2 cursor-pointer flex items-center justify-between ${room.status === 'occupied' ? 'bg-red-50' : room.status === 'reserved' ? 'bg-yellow-50' : 'bg-green-50'}`}>
     <div>
-      <div className="font-medium">{room.number}</div>
+      <div className="font-semibold">{room.number}</div>
       <div className="text-xs text-gray-600">{room.status}</div>
+      {room.reservedFor && <div className="text-xs text-gray-500">Reserved: {room.reservedFor.name}</div>}
     </div>
-    <div className="text-right text-xs">
-      {room.guest ? <div>{room.guest.name}</div> : <div className="text-gray-500">—</div>}
+    <div className="text-right text-sm">
+      {room.guest ? <div className="font-medium">{room.guest.name}</div> : <div className="text-gray-500">—</div>}
+      <div className="mt-1"><button className="text-xs underline" onClick={(e)=>{e.stopPropagation(); onClick(room);}}>Open ID</button></div>
     </div>
   </div>
 );
 
 export default function LiveUpdate() {
+  const navigate = useNavigate();
+  const loc = useLocation();
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
-  const [view, setView] = useState('checkout'); // checkout | reservations | rentpayment | expenses
+  const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
+  const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -79,7 +89,7 @@ export default function LiveUpdate() {
 
   const rightContent = () => {
     if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
-    if (view === 'reservations') {
+  if (view === 'reservations') {
       const res = remoteState.reservations || [];
       const list = res.filter(r => (r.name || '').toLowerCase().includes(search.toLowerCase()));
       return (
@@ -138,15 +148,25 @@ export default function LiveUpdate() {
     );
   };
 
+  // if the path specifically points to a subpage, render that full page on the right
+  const subpath = loc.pathname.split('/').pop();
+  const renderSubpage = () => {
+    if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
+    if (subpath === 'checkout') return <CheckoutPage data={remoteState} />;
+    if (subpath === 'rentpayment') return <RentPaymentPage data={remoteState} />;
+    if (subpath === 'expenses') return <ExpensesPage data={remoteState} />;
+    return null;
+  };
+
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
         <div className="flex-1">
           <div className="flex flex-wrap gap-2 mb-2">
-            <PillButton active={view==='checkout'} onClick={() => setView('checkout')}>Checkout</PillButton>
-            <PillButton active={view==='reservations'} onClick={() => setView('reservations')}>Reservations</PillButton>
-            <PillButton active={view==='rentpayment'} onClick={() => setView('rentpayment')}>RentPayment</PillButton>
-            <PillButton active={view==='expenses'} onClick={() => setView('expenses')}>Expenses</PillButton>
+            <PillButton to="/liveupdate/checkout" active={view==='checkout'}>Checkout</PillButton>
+            <PillButton to="/liveupdate/reservations" active={view==='reservations'}>Reservations</PillButton>
+            <PillButton to="/liveupdate/rentpayment" active={view==='rentpayment'}>RentPayment</PillButton>
+            <PillButton to="/liveupdate/expenses" active={view==='expenses'}>Expenses</PillButton>
           </div>
         </div>
         <div className="w-full md:w-48">
@@ -169,7 +189,7 @@ export default function LiveUpdate() {
 
         <div className="flex-1">
           <div className="border rounded p-3 max-h-[75vh] overflow-auto">
-            {rightContent()}
+            {renderSubpage() || rightContent()}
           </div>
         </div>
       </div>
