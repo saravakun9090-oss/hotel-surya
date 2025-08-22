@@ -36,6 +36,19 @@ server\deploy_render.ps1 -RepoOwner 'your-github-user' -RepoName 'hotel-surya' -
 
 6. Redeploy Netlify (or trigger a manual deploy). Your `/liveupdate` page will now fetch data from the Render-hosted backend.
 
+Netlify helper (optional)
+-------------------------
+This repo includes a small helper script to set the Netlify env var from your machine: `server/set_netlify_env.ps1`.
+
+Example (PowerShell):
+
+```powershell
+# set the backend service URL and optionally a Netlify build hook
+server\set_netlify_env.ps1 -ServiceUrl 'https://hotel-app-backend.onrender.com' -BuildHookUrl 'https://api.netlify.com/build_hooks/XXXXX'
+```
+
+The script will try to use the Netlify CLI if installed, or print UI steps so you can set the variable manually in the Netlify site settings.
+
 Troubleshooting:
 - If the script fails to create a service due to GitHub permissions, open the Render dashboard, connect your GitHub repo, then re-run the script or create the service in the UI.
 - If uploads fail, check Render logs (Logs → Live) and ensure `MONGO_URI` is correct and points to an accessible MongoDB (Atlas IP whitelist, credentials, etc).
