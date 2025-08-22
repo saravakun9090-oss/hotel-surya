@@ -9,7 +9,9 @@
 [build.environment]
   # Set the public backend API base that the frontend will call at runtime (build-time variable)
   # Example: VITE_MONGO_API_BASE = "https://api.example.com/api"
-  VITE_MONGO_API_BASE = "https://your-backend.example.com/api"
+  # IMPORTANT: Do not commit a real API URL here. Set VITE_MONGO_API_BASE in the Netlify
+  # site UI instead: Site → Settings → Build & deploy → Environment → Edit variables
+  # Example value: VITE_MONGO_API_BASE = "https://your-backend.example.com/api"
 
 # Optional: you can add redirects here if you later serve API from the same domain
 # [[redirects]]
