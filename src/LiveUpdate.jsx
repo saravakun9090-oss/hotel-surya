@@ -87,6 +87,21 @@ export default function LiveUpdate() {
     return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
   }, [allRooms, search]);
 
+  // Build a per-floor layout and mark reservations for today
+  const layoutFloors = useMemo(() => {
+    const todayISO = new Date().toISOString().slice(0,10);
+    const lf = {};
+    const keys = Object.keys(floors).sort((a,b)=>Number(a)-Number(b));
+    for (const floorNum of keys) {
+      lf[floorNum] = (floors[floorNum] || []).map(r => {
+        const res = (remoteState?.reservations || []).find(rr => Number(rr.room) === Number(r.number) && rr.date === todayISO);
+        if (res && r.status === 'free') return { ...r, status: 'reserved', reservedFor: res };
+        return r;
+      });
+    }
+    return lf;
+  }, [floors, remoteState]);
+
   const rightContent = () => {
     if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
   if (view === 'reservations') {
@@ -176,14 +191,37 @@ export default function LiveUpdate() {
 
       <div className="flex flex-col md:flex-row gap-4">
         <div className="w-full md:w-80">
-          <div className="mb-2 text-sm text-gray-600">Rooms</div>
-          <div className="max-h-[70vh] overflow-auto">
+          <div className="mb-2 text-sm text-gray-600">Room Layout (Today)</div>
+          <div className="card" style={{ padding: 14, maxHeight: '70vh', overflow: 'auto' }}>
             {loading && <div className="text-sm text-gray-500">Loading...</div>}
             {error && <div className="text-sm text-red-500">{error}</div>}
-            <div className="grid grid-cols-2 md:grid-cols-1 gap-2">
-              {filteredRooms.map(r => <RoomBox key={r.number} room={r} onClick={() => {}} />)}
-            </div>
-            {filteredRooms.length===0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
+            {Object.keys(layoutFloors).length === 0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
+            {Object.keys(layoutFloors).map(floorNum => (
+              <div key={floorNum} style={{ marginBottom: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: 'var(--muted)' }}>Floor {floorNum}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+                  {layoutFloors[floorNum].map(r => (
+                    <div
+                      key={r.number}
+                      className={`room ${r.status}`}
+                      onClick={() => { /* optional click */ }}
+                      style={{
+                        height: 48,
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 8,
+                        background: r.status === 'occupied' ? 'rgba(246, 85, 85, 0.08)' : r.status === 'reserved' ? 'rgba(255, 213, 128, 0.6)' : 'rgba(139, 224, 164, 0.6)',
+                        border: '1px solid rgba(0,0,0,0.06)'
+                      }}
+                    >
+                      {floorNum}{String(r.number).slice(-2)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
