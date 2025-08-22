@@ -1,5 +1,5 @@
 import React, { useEffect,useRef, useState, useMemo } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from "react-router-dom";
 
 import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
@@ -3975,10 +3975,10 @@ export default function App() {
 }, []);
   const loc = useLocation();
   return (
-    <Router>
+    <>
       <div className="app-shell">
         {/* Hide sidebar on liveupdate pages */}
-  {!loc.pathname.startsWith('/liveupdate') && <Sidebar />}
+        {!loc.pathname.startsWith('/liveupdate') && <Sidebar />}
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
@@ -4001,6 +4001,6 @@ export default function App() {
           </Routes>
         </div>
       </div>
-    </Router>
+    </>
   );
 }
