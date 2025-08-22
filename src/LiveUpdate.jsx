@@ -70,6 +70,9 @@ export default function LiveUpdate() {
   const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
   const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
+  const [rentSearch, setRentSearch] = useState('');
+  const [rentFrom, setRentFrom] = useState('');
+  const [rentTo, setRentTo] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -120,14 +123,49 @@ export default function LiveUpdate() {
 
     if (view === 'rentpayment') {
       const pays = remoteState.rentPayments || remoteState.rent_payments || [];
-      const list = pays.filter(p => JSON.stringify(p).toLowerCase().includes(search.toLowerCase()));
+      // apply dedicated rent filters (date range + search)
+      const fromDate = rentFrom ? new Date(rentFrom) : null;
+      const toDate = rentTo ? new Date(rentTo) : null;
+      const list = pays.filter(p => {
+        // search match
+        const matchesSearch = !rentSearch || JSON.stringify(p).toLowerCase().includes(rentSearch.toLowerCase());
+        if (!matchesSearch) return false;
+        // date range match if p.date exists
+        if ((fromDate || toDate) && p.date) {
+          const pd = new Date(p.date);
+          if (Number.isNaN(pd.getTime())) return true; // can't parse, include
+          if (fromDate && pd < fromDate) return false;
+          if (toDate && pd > toDate) return false;
+        }
+        return true;
+      });
+
       return (
         <div>
-          <div className="text-sm text-gray-600 mb-2">Rent Payments</div>
-          {list.map((p, i) => (
-            <div key={i} className="p-2 border-b">{p.date || p.month} — {p.room} — {p.amount}</div>
-          ))}
-          {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-lg font-semibold">Rent Payments</div>
+            <div className="text-sm text-gray-500">{pays.length} total</div>
+          </div>
+
+          <div className="flex gap-2 mb-3 flex-wrap">
+            <input type="date" value={rentFrom} onChange={e=>setRentFrom(e.target.value)} className="px-2 py-1 border rounded text-sm" />
+            <input type="date" value={rentTo} onChange={e=>setRentTo(e.target.value)} className="px-2 py-1 border rounded text-sm" />
+            <input placeholder="Search payments" value={rentSearch} onChange={e=>setRentSearch(e.target.value)} className="px-2 py-1 border rounded text-sm flex-1" />
+            <button className="btn ghost" onClick={() => { setRentFrom(''); setRentTo(''); setRentSearch(''); }}>Clear</button>
+          </div>
+
+          <div className="space-y-1">
+            {list.map((p, i) => (
+              <div key={i} className="p-2 border rounded-sm flex justify-between items-center">
+                <div>
+                  <div className="font-medium">{p.name || p.payer || '—'} — Room {p.room || p.rooms || '—'}</div>
+                  <div className="text-xs text-gray-600">{p.date || p.month || '—'}</div>
+                </div>
+                <div className="text-right font-semibold">{p.amount || p.total || '—'}</div>
+              </div>
+            ))}
+            {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
+          </div>
         </div>
       );
     }

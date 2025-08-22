@@ -3294,8 +3294,11 @@ const [expMsg, setExpMsg] = useState("");
       const roomsKey = roomsArr.join('_') || String(rentForm.room || '').replace(/[^\w\-]+/g, '_');
       const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${roomsKey || 'room'}-${Date.now()}.json`;
 
+      // Ensure amount is stored as a numeric value (strip commas/currency if any)
+      const amountNum = Number(String(rentForm.amount || '').replace(/[^\d.\-]+/g, '')) || 0;
       const rentData = {
         ...rentForm,
+        amount: amountNum,
         room: roomsArr.length ? roomsArr : (isNaN(Number(rentForm.room)) ? rentForm.room : [Number(rentForm.room)]),
         date: new Date().toISOString(),
       };
