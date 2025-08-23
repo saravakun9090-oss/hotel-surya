@@ -1,7 +1,15 @@
 import React from 'react';
 export default function CheckoutPage({ data }) {
   let all = (data?.checkouts || data?.checkoutsList || []);
-  // If no explicit checkouts list, derive active stays from floors
+  // If we have checkout-like records, prefer those (historical checkouts)
+  if (Array.isArray(all) && all.length > 0) {
+    const realCheckouts = all.filter(c => c.checkOutDate || c.checkOutDateTime || c.daysStayed || c.totalRent);
+    if (realCheckouts.length > 0) {
+      all = realCheckouts;
+    }
+  }
+
+  // If no explicit checkout records, derive active stays from floors
   if ((!all || all.length === 0) && data?.floors) {
     const rooms = [];
     for (const fl of Object.values(data.floors)) {
