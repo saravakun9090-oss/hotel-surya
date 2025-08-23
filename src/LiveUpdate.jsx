@@ -181,7 +181,8 @@ export default function LiveUpdate() {
   }, [floors, remoteState]);
 
   const rightContent = () => {
-    if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
+    // if there's no remote state and storage isn't connected, show no-data message
+    if (!remoteState && !storageConnected) return <div className="p-4 text-sm text-gray-500">No data</div>;
   if (view === 'reservations') {
       const res = remoteState.reservations || [];
       const list = res.filter(r => (r.name || '').toLowerCase().includes(search.toLowerCase()));
