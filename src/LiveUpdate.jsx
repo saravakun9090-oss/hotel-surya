@@ -196,7 +196,45 @@ export default function LiveUpdate() {
   const [search, setSearch] = useState('');
 
   const rawState = remoteState || localState || null;
-  const state = useMemo(() => (rawState && Object.keys(rawState).length ? rawState : generateDefaultState()), [rawState]);
+  const state = useMemo(() => {
+    if (!rawState || !Object.keys(rawState).length) return generateDefaultState();
+    // clone to avoid mutating source
+    let s;
+    try { s = JSON.parse(JSON.stringify(rawState)); } catch (_e) { s = { ...rawState }; }
+
+    // ensure floors present
+    if (!s.floors || Object.keys(s.floors).length === 0) s.floors = generateDefaultState().floors;
+
+    // If the backend returned a top-level `guests` array (legacy shape), merge into floors so rooms render as occupied
+    const guestsArr = s.guests || s.guestsList || [];
+    if (Array.isArray(guestsArr) && guestsArr.length > 0) {
+      for (const g of guestsArr) {
+        const rooms = Array.isArray(g.room) ? g.room.map(Number) : [Number(g.room)];
+        for (const rn of rooms) {
+          for (const fk of Object.keys(s.floors)) {
+            const floorArr = s.floors[fk];
+            for (let i = 0; i < floorArr.length; i++) {
+              if (Number(floorArr[i].number) === Number(rn)) {
+                floorArr[i] = {
+                  ...floorArr[i],
+                  status: 'occupied',
+                  guest: {
+                    name: g.name || g.fullName || g.payer || '',
+                    contact: g.contact || g.phone || '',
+                    checkIn: g.checkIn || g.checkInDate || g.createdAt || null,
+                    rate: g.rate || floorArr[i].rate || null,
+                    ...g
+                  }
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return s;
+  }, [rawState]);
   const floors = useMemo(() => (state?.floors || {}), [state]);
 
   const allRooms = useMemo(() => {
