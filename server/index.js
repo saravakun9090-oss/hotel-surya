@@ -25,13 +25,28 @@ async function initDb() {
     return;
   }
   // initialize client and collections
-  if (dbClient && dbClient.topology && dbClient.topology.isConnected && dbClient.isConnected && col && bucket) {
+  if (dbClient && dbClient.topology && dbClient.topology.isConnected && dbClient.isConnected &&
+  col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) {
     return; // already initialized (best-effort check)
   }
   dbClient = new MongoClient(MONGO_URI);
   await dbClient.connect();
   const db = dbClient.db(DB_NAME);
   col = db.collection(COLLECTION);
+
+  // extra collections
+let checkoutsCol;
+let rentPaymentsCol;
+let expensesCol;
+
+checkoutsCol    = db.collection('checkouts');
+rentPaymentsCol = db.collection('rent_payments');
+expensesCol     = db.collection('expenses');
+
+// Indexes (recommended)
+await checkoutsCol.createIndex({ checkOutDateTime: -1 });
+await rentPaymentsCol.createIndex({ date: -1 });
+await expensesCol.createIndex({ date: -1 });
   // GridFS bucket
   const { GridFSBucket } = await import('mongodb');
   bucket = new GridFSBucket(db, { bucketName: 'scans' });
@@ -104,11 +119,46 @@ app.get('/api/download/:id', async (req, res) => {
 });
 
 app.get('/api/state', async (req, res) => {
-  await ensureDb();
-  if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
-  const doc = await col.findOne({ _id: 'singleton' });
-  res.json({ state: doc?.state || null });
+  try {
+    await ensureDb();
+    if (!col || !checkoutsCol || !rentPaymentsCol || !expensesCol) {
+      return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+    }
+
+    // 1) core singleton state (floors, guests, reservations, etc.)
+    const doc = await col.findOne({ _id: 'singleton' });
+    const baseState = doc?.state || null;
+
+    // 2) load extra arrays
+    const [checkouts, rentPayments, expenses] = await Promise.all([
+      checkoutsCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ checkOutDateTime: -1 })
+        .toArray(),
+      rentPaymentsCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ date: -1 })
+        .toArray(),
+      expensesCol
+        .find({}, { projection: { _id: 0 } })
+        .sort({ date: -1 })
+        .toArray()
+    ]);
+
+    // 3) merge into response; do not mutate stored singleton
+    // Frontend expects: state.checkouts, state.rentPayments, state.expenses
+    const merged = baseState ? { ...baseState } : {};
+    merged.checkouts = checkouts;
+    merged.rentPayments = rentPayments;
+    merged.expenses = expenses;
+
+    res.json({ state: merged });
+  } catch (e) {
+    console.error('GET /api/state failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
+
 
 app.post('/api/state', async (req, res) => {
   await ensureDb();
