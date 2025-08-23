@@ -147,8 +147,17 @@ export default function LiveUpdate() {
       alert('No cached state');
     }
   };
-  const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
-  const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
+  const deriveViewFromPath = (path) => {
+    const p = String(path || '').split('/').pop();
+    if (!p || p === 'liveupdate') return 'checkout';
+    return p;
+  };
+  const [view, setView] = useState(deriveViewFromPath(loc.pathname)); // checkout | reservations | rentpayment | expenses
+
+  // keep view in sync when the route changes
+  useEffect(() => {
+    setView(deriveViewFromPath(loc.pathname));
+  }, [loc.pathname]);
   const [search, setSearch] = useState('');
 
   const state = remoteState || localState || {};
