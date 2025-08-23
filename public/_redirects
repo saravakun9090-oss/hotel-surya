@@ -1,0 +1,4 @@
+/*    /index.html   200
+
+# Optional: ensure API paths are not rewritten here. If your backend is on a different domain,
+# set VITE_MONGO_API_BASE to that backend URL (including /api) in Netlify build env vars.
