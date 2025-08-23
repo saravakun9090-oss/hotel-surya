@@ -79,6 +79,19 @@ export default function LiveUpdate() {
   const [localCheckouts, setLocalCheckouts] = useState([]);
   const [storageConnected, setStorageConnected] = useState(false);
 
+  // effective dataset: prefer non-empty remote arrays, otherwise fall back to local lists
+  const effective = useMemo(() => {
+    const e = {};
+    e.floors = remoteState?.floors || {};
+    e.reservations = (remoteState?.reservations && remoteState.reservations.length) ? remoteState.reservations : [];
+    e.checkouts = (remoteState?.checkouts && remoteState.checkouts.length) ? remoteState.checkouts : localCheckouts;
+    if (remoteState?.rentPayments && remoteState.rentPayments.length) e.rentPayments = remoteState.rentPayments;
+    else if (remoteState?.rent_payments && remoteState.rent_payments.length) e.rentPayments = remoteState.rent_payments;
+    else e.rentPayments = localRentList;
+    e.expenses = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
+    return e;
+  }, [remoteState, localRentList, localExpenses, localCheckouts]);
+
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
   const allRooms = useMemo(() => {
@@ -184,9 +197,9 @@ export default function LiveUpdate() {
     }
 
     if (view === 'rentpayment') {
-      const pays = remoteState.rentPayments || remoteState.rent_payments || [];
-      // if remote has none, fall back to local RentCollections (recent days)
-      const effectivePays = (pays && pays.length) ? pays : (localRentList || []);
+      // build effective pays (prefer non-empty remote arrays)
+      const paysRemote = (remoteState?.rentPayments && remoteState.rentPayments.length) ? remoteState.rentPayments : (remoteState?.rent_payments && remoteState.rent_payments.length ? remoteState.rent_payments : null);
+      const effectivePays = paysRemote ? paysRemote : (localRentList || []);
       // apply dedicated rent filters (date range + search)
       const fromDate = rentFrom ? new Date(rentFrom) : null;
       const toDate = rentTo ? new Date(rentTo) : null;
@@ -235,7 +248,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'expenses') {
-      const ex = remoteState.expenses || [];
+      const ex = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
       const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
@@ -249,8 +262,17 @@ export default function LiveUpdate() {
     }
 
     // default: checkout view
-    const occupied = allRooms.filter(r => r.status === 'occupied');
-    const list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
+    // prefer effective.checkouts when available (from remote or local fallback)
+    const effectiveCheckouts = effective.checkouts || [];
+    // If effectiveCheckouts contains data, use it; otherwise fall back to occupied rooms for active stays
+    let list = [];
+    if (effectiveCheckouts.length) {
+      // normalize checkouts into items with name and room fields for searching
+      list = effectiveCheckouts.filter(c => (String(c.name || c.guest?.name || c.room || c.rooms) || '').toLowerCase().includes(search.toLowerCase()));
+    } else {
+      const occupied = allRooms.filter(r => r.status === 'occupied');
+      list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
+    }
     return (
       <div>
         <div className="text-sm text-gray-600 mb-2">Checkouts / Active Stays</div>
@@ -268,10 +290,10 @@ export default function LiveUpdate() {
   // if the path specifically points to a subpage, render that full page on the right
   const subpath = loc.pathname.split('/').pop();
   const renderSubpage = () => {
-  if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
-  if (subpath === 'checkout') return <CheckoutPage data={ remoteState || { checkouts: localCheckouts } } />;
-  if (subpath === 'rentpayment') return <RentPaymentPage data={ remoteState || { rentPayments: localRentList } } />;
-  if (subpath === 'expenses') return <ExpensesPage data={ remoteState || { expenses: localExpenses } } />;
+    if (subpath === 'reservations') return <ReservationsPage data={effective} />;
+    if (subpath === 'checkout') return <CheckoutPage data={effective} />;
+    if (subpath === 'rentpayment') return <RentPaymentPage data={effective} />;
+    if (subpath === 'expenses') return <ExpensesPage data={effective} />;
     return null;
   };
 
