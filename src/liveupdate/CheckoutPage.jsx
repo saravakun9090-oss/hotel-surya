@@ -1,6 +1,19 @@
 import React from 'react';
 export default function CheckoutPage({ data }) {
-  const all = (data?.checkouts || data?.checkoutsList || []).slice().reverse();
+  let all = (data?.checkouts || data?.checkoutsList || []);
+  // If no explicit checkouts list, derive active stays from floors
+  if ((!all || all.length === 0) && data?.floors) {
+    const rooms = [];
+    for (const fl of Object.values(data.floors)) {
+      for (const r of fl) {
+        if (r?.status === 'occupied' && r.guest) {
+          rooms.push({ room: r.number, name: r.guest?.name || r.guest?.fullName || '', checkIn: r.guest?.checkIn || r.guest?.checkInDate || null, checkOut: r.guest?.checkOut || null });
+        }
+      }
+    }
+    all = rooms;
+  }
+  all = (all || []).slice().reverse();
   return (
     <div>
       <h2 className="text-lg font-medium mb-2">Checkouts / Active Stays</h2>

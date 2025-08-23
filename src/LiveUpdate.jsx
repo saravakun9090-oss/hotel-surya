@@ -11,6 +11,18 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
 
 const STORAGE_KEY = 'hotel_demo_v2';
 
+function generateDefaultState() {
+  const floors = {};
+  for (let f = 1; f <= 5; f++) {
+    floors[f] = [];
+    for (let r = 1; r <= 4; r++) {
+      const number = f * 100 + r;
+      floors[f].push({ number, status: 'free', guest: null, reservedFor: null, rate: null });
+    }
+  }
+  return { floors, guests: [], reservations: [], checkins: [], checkouts: [], rentPayments: [], expenses: [] };
+}
+
 function usePolling(url, interval = 2000) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -160,7 +172,8 @@ export default function LiveUpdate() {
   }, [loc.pathname]);
   const [search, setSearch] = useState('');
 
-  const state = remoteState || localState || {};
+  const rawState = remoteState || localState || null;
+  const state = useMemo(() => (rawState && Object.keys(rawState).length ? rawState : generateDefaultState()), [rawState]);
   const floors = useMemo(() => (state?.floors || {}), [state]);
 
   const allRooms = useMemo(() => {
@@ -248,6 +261,9 @@ export default function LiveUpdate() {
     return null;
   };
 
+  // small debug panel to inspect the current resolved state
+  const [showDebug, setShowDebug] = useState(false);
+
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
@@ -286,7 +302,15 @@ export default function LiveUpdate() {
 
         <div className="flex-1">
           <div className="border rounded p-3 max-h-[75vh] overflow-auto">
-            {renderSubpage() || rightContent()}
+              {renderSubpage() || rightContent()}
+              <div style={{ marginTop: 12 }}>
+                <button className="text-xs px-2 py-1 border rounded" onClick={() => setShowDebug(s => !s)}>{showDebug ? 'Hide' : 'Show'} resolved state</button>
+                {showDebug && (
+                  <pre className="mt-2 p-2 bg-gray-100 rounded text-xs overflow-auto" style={{ maxHeight: 240 }}>
+                    {JSON.stringify(state, null, 2)}
+                  </pre>
+                )}
+              </div>
           </div>
         </div>
       </div>
