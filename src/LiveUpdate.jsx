@@ -20,8 +20,23 @@ function usePolling(url, interval = 2000) {
 
     const fetchOnce = async () => {
       try {
+        if (!url) throw new Error('No API URL configured');
         const res = await fetch(url);
-        if (!res.ok) throw new Error(await res.text());
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        // If server returned non-OK, prefer the text body for debugging
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+        // If server returns HTML it's likely Netlify serving index.html (no backend configured)
+        if (ct.includes('text/html')) {
+          const text = await res.text();
+          throw new Error('Expected JSON from API but received HTML (likely no backend configured).');
+        }
+        if (!ct.includes('application/json')) {
+          const text = await res.text();
+          throw new Error('Server returned non-JSON response (see console)');
+        }
         const json = await res.json();
         if (!mounted) return;
         setData(json.state || null);
@@ -29,7 +44,16 @@ function usePolling(url, interval = 2000) {
         setError(null);
       } catch (e) {
         if (!mounted) return;
-        setError(String(e));
+        // Friendly error messages help Netlify users diagnose missing backend env
+        const msg = String(e);
+        console.error('LiveUpdate fetch error:', msg, url);
+        if (msg.includes('Expected JSON from API')) {
+          setError(`Could not reach backend API at ${url}. This usually means the site doesn't have a backend configured - set VITE_MONGO_API_BASE in Netlify (Site settings → Build & deploy → Environment) to your backend URL (include /api).`);
+        } else if (msg.includes('No API URL configured')) {
+          setError('No backend API configured. Set VITE_MONGO_API_BASE in your build environment.');
+        } else {
+          setError(msg);
+        }
         setLoading(false);
       }
     };
