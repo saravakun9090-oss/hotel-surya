@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { getBaseFolder, ensurePath } from './utils/fsAccess';
+import { getBaseFolder, ensurePath, writeFile, readJSONFile, writeJSON } from './utils/fsAccess';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -236,6 +236,120 @@ export default function LiveUpdate() {
     return map;
   }, [effective.rentPayments, occupiedGroups]);
 
+  // scannedMap and utilities (mark which guest groups have a saved scanned ID)
+  const [scannedMap, setScannedMap] = useState({});
+
+  const groupKey = (group) => `${String(group.guest?.name||'').toLowerCase()}::${(group.guest?.checkIn||'').slice(0,10)}`;
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+        const newMap = {};
+
+        async function recurse(dir, safeQuery, foundObj) {
+          for await (const [entryName, entryHandle] of dir.entries()) {
+            if (!mounted) return;
+            if (entryHandle.kind === 'directory') {
+              await recurse(entryHandle, safeQuery, foundObj);
+              if (foundObj.found) return;
+            } else if (entryHandle.kind === 'file') {
+              if (entryName.toLowerCase().includes(safeQuery)) { foundObj.found = entryHandle; return; }
+            }
+          }
+        }
+
+        for (const g of occupiedGroups) {
+          const safe = String(g.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+          const found = { found: null };
+          try { await recurse(scannedRoot, safe, found); } catch (e) { /* ignore */ }
+          if (found.found) newMap[g._key] = true;
+        }
+
+        if (!mounted) return;
+        setScannedMap(m => ({ ...m, ...newMap }));
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { mounted = false; };
+  }, [occupiedGroups]);
+
+  // Open a preview of scanned ID for a guest group (opens in new tab)
+  const openGuestPreview = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+      const safe = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      let foundHandle = null;
+
+      async function recurse(dir) {
+        for await (const [entryName, entryHandle] of dir.entries()) {
+          if (entryHandle.kind === 'directory') { const r = await recurse(entryHandle); if (r) return r; }
+          else if (entryHandle.kind === 'file') {
+            if (entryName.toLowerCase().includes(safe)) return entryHandle;
+          }
+        }
+        return null;
+      }
+
+      foundHandle = await recurse(scannedRoot);
+      if (!foundHandle) return alert('No scanned document found for this guest');
+      const file = await foundHandle.getFile();
+      const url = URL.createObjectURL(file);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) {
+      console.warn('Preview open failed', err);
+      alert('Failed to open scanned document');
+    }
+  };
+
+  // Attach a scanned file to a guest: simple picker -> save under today's ScannedDocuments folder
+  const attachScanToGuest = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      // pick file
+      let file = null;
+      if (window.showOpenFilePicker) {
+        try {
+          const [handle] = await window.showOpenFilePicker({ multiple: false });
+          file = await handle.getFile();
+        } catch (e) { return; }
+      } else {
+        const picked = await new Promise((resolve) => {
+          const input = document.createElement('input');
+          input.type = 'file'; input.accept = 'image/*,.pdf'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
+          document.body.appendChild(input); input.click(); setTimeout(() => document.body.removeChild(input), 1000);
+        });
+        if (!picked) return; file = picked;
+      }
+
+      const now = new Date();
+      const todayISOstr = now.toISOString().slice(0,10);
+      const year = String(now.getFullYear());
+      const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+      const dateFolder = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+      const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
+      const safeName = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() || 'guest';
+      const roomsKey = (group.rooms || []).join('_') || 'rooms';
+      const rawExt = (file.name && file.name.includes('.')) ? file.name.split('.').pop() : 'jpg';
+      const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0,8) || 'jpg';
+      const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+      await writeFile(scansDir, newFileName, file);
+      setScannedMap(m => ({ ...m, [group._key || groupKey(group)]: true }));
+      alert('Scanned file saved');
+    } catch (err) {
+      console.warn('Attach scan failed', err);
+      alert('Failed to attach scan: ' + (err?.message || String(err)));
+    }
+  };
+
   const rightContent = () => {
     if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
   if (view === 'reservations') {
@@ -317,28 +431,72 @@ export default function LiveUpdate() {
       );
     }
 
-    // default: checkout view
-    // prefer effective.checkouts when available (from remote or local fallback)
-    const effectiveCheckouts = effective.checkouts || [];
-    // If effectiveCheckouts contains data, use it; otherwise fall back to occupied rooms for active stays
-    let list = [];
-    if (effectiveCheckouts.length) {
-      // normalize checkouts into items with name and room fields for searching
-      list = effectiveCheckouts.filter(c => (String(c.name || c.guest?.name || c.room || c.rooms) || '').toLowerCase().includes(search.toLowerCase()));
-    } else {
-      const occupied = allRooms.filter(r => r.status === 'occupied');
-      list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
-    }
+    // default: show grouped Current Guests card list (similar to Check-In page)
+    const q = (guestSearch || '').trim().toLowerCase();
+    const filtered = occupiedGroups.filter(g => {
+      if (!q) return true;
+      const name = String(g.guest?.name || '').toLowerCase();
+      const rooms = (g.rooms || []).map(String).join(', ');
+      return name.includes(q) || rooms.includes(q);
+    });
+
     return (
       <div>
-        <div className="text-sm text-gray-600 mb-2">Checkouts / Active Stays</div>
-        {list.map((r) => (
-          <div key={r.number} className="p-2 border-b">
-            <div className="font-medium">Room {r.number} — {r.guest?.name}</div>
-            <div className="text-xs text-gray-600">Contact: {r.guest?.contact || '—'} • Rate: {r.guest?.rate || '—'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 800 }}>Current Guests</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
+        </div>
+
+        {filtered.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
+            {filtered.map((g, idx) => {
+              const name = g.guest?.name || 'Guest';
+              const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
+              return (
+                <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
+                    {initials}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {(g.rooms || []).join(', ')}</div>
+                          {g.guest?.edited && (
+                            <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginTop: 8, fontSize: 12 }}>
+                      <div>Phone no: {g.guest.contact}</div>
+                      <div>Price: ₹{g.guest?.rate || 0}/day</div>
+                      <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
+                      <div>Paid: ₹{paymentsMap[g._key] || 0}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
+                    {scannedMap[g._key] ? (
+                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
+                    ) : (
+                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.18)' }} onClick={() => attachScanToGuest(g)}>⬆️ Upload ID</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))}
-        {list.length===0 && <div className="p-2 text-sm text-gray-500">No active checkouts</div>}
+        </div>
       </div>
     );
   };
