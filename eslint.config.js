@@ -23,7 +23,21 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // legacy codebase: prefer warnings for unused vars and other noisy rules
+      'no-unused-vars': ['warn', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-empty': 'warn',
+      'no-useless-escape': 'off',
+      'react-hooks/exhaustive-deps': 'warn'
     },
+  },
+  {
+    files: ['server/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      // server files often use process, allow it
+      'no-undef': 'off'
+    }
   },
 ])

@@ -75,14 +75,14 @@ export default function LiveUpdate() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
   });
 
-  const [lastUpdated, setLastUpdated] = useState(null);
+  // lastUpdated removed (was unused)
 
   useEffect(() => {
     // listen for other windows updating the localStorage key
     const onStorage = (ev) => {
       if (!ev) return;
       if (ev.key === STORAGE_KEY) {
-        try { setLocalState(ev.newValue ? JSON.parse(ev.newValue) : null); } catch (e) { /* ignore */ }
+        try { setLocalState(ev.newValue ? JSON.parse(ev.newValue) : null); } catch (_e) { /* ignore */ }
       }
     };
     window.addEventListener('storage', onStorage);
@@ -107,8 +107,7 @@ export default function LiveUpdate() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState));
       setLocalState(remoteState);
-      setLastUpdated(Date.now());
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('hotel_state');
@@ -129,10 +128,9 @@ export default function LiveUpdate() {
       const json = await res.json();
       const s = json.state || null;
       if (s) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (_e) {}
         setLocalState(s);
-        setLastUpdated(Date.now());
-        try { if (typeof BroadcastChannel !== 'undefined') { const ch=new BroadcastChannel('hotel_state'); ch.postMessage({state:s}); ch.close(); } } catch (e) {}
+  try { if (typeof BroadcastChannel !== 'undefined') { const ch=new BroadcastChannel('hotel_state'); ch.postMessage({state:s}); ch.close(); } } catch (_e) {}
       }
     } catch (err) {
       alert('Fetch failed: ' + String(err));
@@ -144,8 +142,8 @@ export default function LiveUpdate() {
       const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
       if (!s) return alert('No cached state');
       setLocalState(s);
-      setLastUpdated(Date.now());
-    } catch (e) {
+  // updated
+    } catch (_e) {
       alert('No cached state');
     }
   };

@@ -1,3 +1,4 @@
+/* eslint-env node */
 import express from 'express';
 import cors from 'cors';
 import { MongoClient } from 'mongodb';
@@ -44,8 +45,8 @@ async function ensureDb() {
   if (col && bucket) return;
   try {
     await initDb();
-  } catch (err) {
-    console.error('ensureDb failed', err.message || err);
+  } catch (_err) {
+    console.error('ensureDb failed', _err.message || _err);
   }
 }
 

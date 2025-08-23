@@ -1,6 +1,5 @@
 import React, { useEffect,useRef, useState, useMemo } from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { useSearchParams } from "react-router-dom";
 
 import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
 import { monthFolder, displayDate, ymd } from './utils/dateUtils';
@@ -1162,8 +1161,8 @@ function CheckIn({ state, setState, locationState }) {
     }
   }
 
-  async function useGuestMatch(match) {
-    setForm(f => ({ ...f, name: match.name, contact: match.contact }));
+  async function guestMatch(match) {
+  setForm(f => ({ ...f, name: match.name, contact: match.contact, room: match.room }));
     setGuestMatches([]);
     try {
       const base = await getBaseFolder();
@@ -1552,9 +1551,9 @@ function CheckIn({ state, setState, locationState }) {
                     zIndex: 500, maxHeight: 220, overflowY: 'auto'
                   }}
                 >
-                  {guestMatches.map((m, idx) => (
+                      {guestMatches.map((m, idx) => (
                     <div key={idx} style={{ padding: '6px 8px', cursor: 'pointer' }}
-                      onMouseDown={(e) => { e.preventDefault(); useGuestMatch(m); }}>
+                      onMouseDown={(e) => { e.preventDefault(); guestMatch(m); }}>
                       <strong>{m.name}</strong> {m.contact && ` – ${m.contact}`}
                     </div>
                   ))}

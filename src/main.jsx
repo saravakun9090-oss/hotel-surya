@@ -12,7 +12,7 @@ window.__MONGO_API_BASE__ = window.__MONGO_API_BASE__ || 'http://localhost:4000/
 try {
   const buildBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ? import.meta.env.VITE_MONGO_API_BASE : null;
   console.info('API base:', buildBase || window.__MONGO_API_BASE__ || '(none)');
-} catch (e) { /* ignore */ }
+} catch (_e) { /* ignore */ }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
