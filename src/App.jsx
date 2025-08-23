@@ -1,5 +1,5 @@
 import React, { useEffect,useRef, useState, useMemo } from 'react';
-import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from "react-router-dom";
 
 import { getBaseFolder, ensurePath, writeJSON, writeFile, readJSONFile } from './utils/fsAccess';
@@ -3294,11 +3294,8 @@ const [expMsg, setExpMsg] = useState("");
       const roomsKey = roomsArr.join('_') || String(rentForm.room || '').replace(/[^\w\-]+/g, '_');
       const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${roomsKey || 'room'}-${Date.now()}.json`;
 
-      // Ensure amount is stored as a numeric value (strip commas/currency if any)
-      const amountNum = Number(String(rentForm.amount || '').replace(/[^\d.\-]+/g, '')) || 0;
       const rentData = {
         ...rentForm,
-        amount: amountNum,
         room: roomsArr.length ? roomsArr : (isNaN(Number(rentForm.room)) ? rentForm.room : [Number(rentForm.room)]),
         date: new Date().toISOString(),
       };
@@ -3978,10 +3975,10 @@ export default function App() {
 }, []);
   const loc = useLocation();
   return (
-    <>
+    <Router>
       <div className="app-shell">
         {/* Hide sidebar on liveupdate pages */}
-        {!loc.pathname.startsWith('/liveupdate') && <Sidebar />}
+  {!loc.pathname.startsWith('/liveupdate') && <Sidebar />}
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
@@ -4004,6 +4001,6 @@ export default function App() {
           </Routes>
         </div>
       </div>
-    </>
+    </Router>
   );
 }
