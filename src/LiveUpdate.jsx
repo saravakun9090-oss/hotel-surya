@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -8,6 +8,8 @@ import ExpensesPage from './liveupdate/ExpensesPage';
 const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
   ? import.meta.env.VITE_MONGO_API_BASE
   : (window.__MONGO_API_BASE__ || '/api');
+
+const STORAGE_KEY = 'hotel_demo_v2';
 
 function usePolling(url, interval = 2000) {
   const [data, setData] = useState(null);
@@ -64,14 +66,94 @@ const RoomBox = ({ room, onClick }) => (
 );
 
 export default function LiveUpdate() {
-  const navigate = useNavigate();
   const loc = useLocation();
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
+
+  // local fallback so LiveUpdate still shows data when the storage backend isn't available
+  const [localState, setLocalState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+  });
+
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(() => {
+    // listen for other windows updating the localStorage key
+    const onStorage = (ev) => {
+      if (!ev) return;
+      if (ev.key === STORAGE_KEY) {
+        try { setLocalState(ev.newValue ? JSON.parse(ev.newValue) : null); } catch (e) { /* ignore */ }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    // BroadcastChannel (if available) for same-origin tabs to sync immediately
+    let bc;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('hotel_state');
+        bc.onmessage = (m) => {
+          if (m?.data?.state) setLocalState(m.data.state);
+        };
+      }
+    } catch (e) { /* ignore */ }
+
+    return () => { window.removeEventListener('storage', onStorage); if (bc) bc.close(); };
+  }, []);
+
+  // when remote state arrives, cache it locally and broadcast to other tabs
+  useEffect(() => {
+    if (!remoteState) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteState));
+      setLocalState(remoteState);
+      setLastUpdated(Date.now());
+    } catch (e) { /* ignore */ }
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('hotel_state');
+        ch.postMessage({ state: remoteState });
+        ch.close();
+      }
+    } catch (e) { /* ignore */ }
+  }, [remoteState]);
+
+  // force fetch: immediate one-time fetch that updates local cache/state
+  const forceFetch = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/state`);
+      if (!res.ok) {
+        const txt = await res.text();
+        return alert('Fetch failed: ' + txt);
+      }
+      const json = await res.json();
+      const s = json.state || null;
+      if (s) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {}
+        setLocalState(s);
+        setLastUpdated(Date.now());
+        try { if (typeof BroadcastChannel !== 'undefined') { const ch=new BroadcastChannel('hotel_state'); ch.postMessage({state:s}); ch.close(); } } catch (e) {}
+      }
+    } catch (err) {
+      alert('Fetch failed: ' + String(err));
+    }
+  };
+
+  const reloadFromCache = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!s) return alert('No cached state');
+      setLocalState(s);
+      setLastUpdated(Date.now());
+    } catch (e) {
+      alert('No cached state');
+    }
+  };
   const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
   const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
 
-  const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
+  const state = remoteState || localState || {};
+  const floors = useMemo(() => (state?.floors || {}), [state]);
 
   const allRooms = useMemo(() => {
     const arr = [];
@@ -88,9 +170,9 @@ export default function LiveUpdate() {
   }, [allRooms, search]);
 
   const rightContent = () => {
-    if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
+  if (!state) return <div className="p-4 text-sm text-gray-500">No data</div>;
   if (view === 'reservations') {
-      const res = remoteState.reservations || [];
+  const res = state.reservations || [];
       const list = res.filter(r => (r.name || '').toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
@@ -104,7 +186,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'rentpayment') {
-      const pays = remoteState.rentPayments || remoteState.rent_payments || [];
+  const pays = state.rentPayments || state.rent_payments || [];
       const list = pays.filter(p => JSON.stringify(p).toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
@@ -118,7 +200,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'expenses') {
-      const ex = remoteState.expenses || [];
+  const ex = state.expenses || [];
       const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
@@ -132,7 +214,7 @@ export default function LiveUpdate() {
     }
 
     // default: checkout view
-    const occupied = allRooms.filter(r => r.status === 'occupied');
+  const occupied = allRooms.filter(r => r.status === 'occupied');
     const list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
     return (
       <div>
@@ -151,10 +233,10 @@ export default function LiveUpdate() {
   // if the path specifically points to a subpage, render that full page on the right
   const subpath = loc.pathname.split('/').pop();
   const renderSubpage = () => {
-    if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
-    if (subpath === 'checkout') return <CheckoutPage data={remoteState} />;
-    if (subpath === 'rentpayment') return <RentPaymentPage data={remoteState} />;
-    if (subpath === 'expenses') return <ExpensesPage data={remoteState} />;
+    if (subpath === 'reservations') return <ReservationsPage data={state} />;
+    if (subpath === 'checkout') return <CheckoutPage data={state} />;
+    if (subpath === 'rentpayment') return <RentPaymentPage data={state} />;
+    if (subpath === 'expenses') return <ExpensesPage data={state} />;
     return null;
   };
 
@@ -170,7 +252,14 @@ export default function LiveUpdate() {
           </div>
         </div>
         <div className="w-full md:w-48">
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search" className="w-full px-2 py-1 border rounded text-sm" />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search" className="flex-1 px-2 py-1 border rounded text-sm" />
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div className={`text-xs px-2 py-1 rounded ${remoteState ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{remoteState ? 'Live' : 'Cached'}</div>
+              <button className="text-xs px-2 py-1 border rounded" onClick={forceFetch}>Force fetch</button>
+              <button className="text-xs px-2 py-1 border rounded" onClick={reloadFromCache}>Reload cache</button>
+            </div>
+          </div>
         </div>
       </div>
 
