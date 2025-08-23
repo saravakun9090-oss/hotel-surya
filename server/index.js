@@ -99,8 +99,9 @@ app.get('/api/download/:id', async (req, res) => {
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => res.status(404).send(String(err)));
     downloadStream.pipe(res);
-  } catch (e) {
-    res.status(500).send(String(e));
+  } catch (_e) {
+    console.error('Error initializing server:', _e.message);
+    process.exitCode = 1;
   }
 });
 
@@ -127,7 +128,8 @@ app.get('/api/fullstate', async (req, res) => {
         const exists = await db.listCollections({ name }).hasNext();
         if (!exists) return [];
         return await db.collection(name).find().toArray();
-      } catch (e) {
+      } catch (_e) {
+        void _e;
         return [];
       }
     };

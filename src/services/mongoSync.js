@@ -54,8 +54,8 @@ export async function testConnection() {
     }
     // ping may return non-json, but OK status is enough
     return true;
-  } catch (e) {
-    console.error('Ping error', e);
-    return false;
+  } catch (_e) {
+    console.error('mongoSync error', _e);
+    return { ok: false };
   }
 }

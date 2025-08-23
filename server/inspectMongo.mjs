@@ -47,8 +47,8 @@ async function run() {
     const appCount = await col.countDocuments().catch(()=>0);
     console.log('\n' + colName + ' document count:', appCount);
 
-  } catch (e) {
-    console.error('Error:', e.message);
+  } catch (_e) {
+    console.error('Error:', _e.message);
     process.exitCode = 1;
   } finally {
     await client.close();

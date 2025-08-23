@@ -72,7 +72,7 @@ export default function LiveUpdate() {
 
   // local fallback so LiveUpdate still shows data when the storage backend isn't available
   const [localState, setLocalState] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (_e) { void _e; return null; }
   });
 
   // lastUpdated removed (was unused)
@@ -96,7 +96,7 @@ export default function LiveUpdate() {
           if (m?.data?.state) setLocalState(m.data.state);
         };
       }
-    } catch (e) { /* ignore */ }
+  } catch (_e) { void _e; }
 
     return () => { window.removeEventListener('storage', onStorage); if (bc) bc.close(); };
   }, []);
@@ -114,7 +114,7 @@ export default function LiveUpdate() {
         ch.postMessage({ state: remoteState });
         ch.close();
       }
-    } catch (e) { /* ignore */ }
+  } catch (_e) { void _e; }
   }, [remoteState]);
 
   // force fetch: immediate one-time fetch that updates local cache/state

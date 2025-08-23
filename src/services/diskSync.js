@@ -69,8 +69,8 @@ export async function hydrateStateFromDisk(currentState) {
         }
       }
     }
-  } catch (err) {
-    console.warn("No Checkins folder or error reading it:", err);
+  } catch (_e) {
+    console.warn("No Checkins folder or error reading it:", _e);
   }
 
   // ---- Load Reservations ----

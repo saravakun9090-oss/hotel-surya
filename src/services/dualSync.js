@@ -6,7 +6,7 @@ let HAS_API = true;
 try {
   // testConnection will return false if no API configured
   testConnection().then(ok => { HAS_API = ok; }).catch(() => { HAS_API = false; });
-} catch (e) { HAS_API = false; }
+} catch (_e) { HAS_API = false; }
 
 const OUTBOX_KEY = 'remote_outbox_state';
 const FLUSH_INTERVAL = 5000; // try flush every 5s
@@ -15,7 +15,7 @@ function readOutbox() {
   try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null'); } catch { return null; }
 }
 function writeOutbox(payload) {
-  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(payload)); } catch (e) { console.warn('writeOutbox failed', e); }
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(payload)); } catch (_e) { console.warn('writeOutbox failed', _e); }
 }
 function clearOutbox() { localStorage.removeItem(OUTBOX_KEY); }
 
@@ -29,10 +29,9 @@ export async function saveAll(state) {
     const res = await saveStateToMongo(state);
     clearOutbox();
     return { ok: true, res };
-  } catch (e) {
-    console.warn('saveAll: failed to save to mongo, queuing outbox', e?.message || e);
-    writeOutbox({ state, ts: new Date().toISOString() });
-    return { ok: false, error: String(e) };
+  } catch (_e) {
+    console.error('Dual sync run error', _e);
+    return { ok: false };
   }
 }
 
@@ -51,8 +50,8 @@ export async function tryLoadRemoteAndMerge(localState) {
       }
     }
     return merged;
-  } catch (e) {
-    console.warn('tryLoadRemoteAndMerge failed', e?.message || e);
+  } catch (_e) {
+    console.warn('tryLoadRemoteAndMerge failed', _e?.message || _e);
     return null;
   }
 }
@@ -70,9 +69,9 @@ async function flushOnce() {
     await saveStateToMongo(item.state);
     clearOutbox();
     console.log('dualSync: flushed outbox to remote');
-  } catch (e) {
+  } catch (_e) {
     // leave in outbox; will retry later
-    //console.warn('dualSync: flush failed', e?.message || e);
+    //console.warn('dualSync: flush failed', _e?.message || _e);
   }
 }
 

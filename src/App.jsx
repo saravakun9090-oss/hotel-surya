@@ -57,7 +57,7 @@ floors[f].push({ number, status: "free", guest: null, reservedFor: null });
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) { return generateDefault(); }
-  try { return JSON.parse(raw); } catch (e) { return generateDefault(); }
+  try { return JSON.parse(raw); } catch (_e) { return generateDefault(); }
 }
 function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
@@ -654,7 +654,7 @@ function CheckIn({ state, setState, locationState }) {
           await writeJSON(checkinDir, newFileName, newData);
           // remove the old file if name changed
           if (foundOld.entryName !== newFileName) {
-            try { await checkinDir.removeEntry(foundOld.entryName); } catch (e) { console.warn('Failed to remove old checkin file', e); }
+            try { await checkinDir.removeEntry(foundOld.entryName); } catch (_e) { console.warn('Failed to remove old checkin file', _e); }
           }
           // Also update RentCollections so previous payments map to the new rooms
           try {
@@ -979,7 +979,7 @@ function CheckIn({ state, setState, locationState }) {
           // write link.json at root with mapping
           try {
             await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() });
-          } catch (e) { /* ignore link write failures */ }
+          } catch (_e) { void _e; }
         } catch (e) {
           console.warn('Upload failed or not configured', e);
         }
@@ -1026,7 +1026,7 @@ function CheckIn({ state, setState, locationState }) {
     const { uploadFileToServer } = await import('./services/upload');
     const resp = await uploadFileToServer(file);
     try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
-  } catch (e) { console.warn('Upload failed', e); }
+  } catch (_e) { console.warn('Upload failed', _e); }
 
       // delete temp entry (best-effort)
       try {
@@ -1235,7 +1235,7 @@ function CheckIn({ state, setState, locationState }) {
         const { uploadFileToServer } = await import('./services/upload');
         const resp = await uploadFileToServer(file);
         try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
-      } catch (e) { console.warn('Upload failed', e); }
+  } catch (_e) { console.warn('Upload failed', _e); }
       console.log("Reused old scan saved:", newFileName);
       return;
     }
@@ -3955,7 +3955,7 @@ export default function App() {
       try {
         const { saveAll } = await import('./services/dualSync');
         saveAll(state).catch(e => console.warn('remote save failed', e));
-      } catch (e) { console.warn('dualSync import failed', e); }
+  } catch (_e) { console.warn('dualSync import failed', _e); }
     })();
   }, [state]);
 

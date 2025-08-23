@@ -31,8 +31,8 @@ async function run() {
     const sample = generateDefault();
     const res = await col.updateOne({ _id: 'singleton' }, { $set: { state: sample, updatedAt: new Date() } }, { upsert: true });
   console.log('Wrote default state. result:', res.result || res);
-  } catch (e) {
-    console.error('Error seeding:', e.message);
+  } catch (_e) {
+    console.error('Error seeding:', _e.message);
     process.exitCode = 1;
   } finally {
     await client.close();

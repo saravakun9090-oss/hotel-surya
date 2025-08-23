@@ -39,16 +39,16 @@ export default function StorageSetup({ setState, state }) {
             setState(merged);
           }
           setStatus('Connected to Mongo and local storage');
-        } catch (e) {
-          console.warn('Mongo load failed', e);
+          } catch (_e) {
+          console.warn('Mongo load failed', _e);
           setStatus('Local loaded; Mongo connection failed');
         }
       } else {
         setStatus('Local loaded; Mongo not available');
       }
-    } catch (err) {
-      console.error(err);
-      setStatus(`Error: ${err.message}`);
+    } catch (_err) {
+      console.error(_err);
+      setStatus(`Error: ${_err.message}`);
     } finally {
       setConnecting(false);
     }
@@ -87,8 +87,8 @@ export default function StorageSetup({ setState, state }) {
               }
               setStatus('Connected to Mongo and local storage');
               localStorage.setItem('storage_connected', '1');
-            } catch (e) {
-              console.warn('Mongo auto-load failed', e);
+            } catch (_e) {
+              console.warn('Mongo auto-load failed', _e);
               setStatus('Local loaded; Mongo connection failed');
             }
           } else {
@@ -97,8 +97,8 @@ export default function StorageSetup({ setState, state }) {
         } else {
           setStatus('Not connected');
         }
-      } catch (e) {
-        console.warn('Auto-connect failed', e);
+      } catch (_e) {
+        console.warn('Auto-connect failed', _e);
         setStatus('Idle');
       }
     })();
