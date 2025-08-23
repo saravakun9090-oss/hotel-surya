@@ -74,7 +74,10 @@ export default function LiveUpdate() {
   const [rentSearch, setRentSearch] = useState('');
   const [rentFrom, setRentFrom] = useState('');
   const [rentTo, setRentTo] = useState('');
-  const [localPays, setLocalPays] = useState([]);
+  const [localRentList, setLocalRentList] = useState([]);
+  const [localExpenses, setLocalExpenses] = useState([]);
+  const [localCheckouts, setLocalCheckouts] = useState([]);
+  const [storageConnected, setStorageConnected] = useState(false);
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -92,28 +95,58 @@ export default function LiveUpdate() {
     return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
   }, [allRooms, search]);
 
-  // Load today's local RentCollections as a fallback when remote doesn't provide payments
+  // Load recent local RentCollections, Expenses and Checkouts as fallbacks when remote doesn't provide data
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const base = await getBaseFolder();
+        setStorageConnected(!!base);
         if (!base) return;
-        const today = new Date().toISOString().slice(0,10);
-        const rentDir = await ensurePath(base, ['RentCollections', today]);
-        const arr = [];
-        for await (const [name, handle] of rentDir.entries()) {
-          if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+
+        const rentAcc = [];
+        const expAcc = [];
+        const checkoutAcc = [];
+        // scan last 7 days
+        for (let d = 0; d < 7; d++) {
+          const dt = new Date();
+          dt.setDate(dt.getDate() - d);
+          const folder = dt.toISOString().slice(0,10);
+
           try {
-            const f = await handle.getFile();
-            const data = JSON.parse(await f.text());
-            data._file = name;
-            arr.push(data);
-          } catch (e) { continue; }
+            const rentDir = await ensurePath(base, ['RentCollections', folder]);
+            for await (const [name, handle] of rentDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `RentCollections/${folder}/${name}`; rentAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const expDir = await ensurePath(base, ['Expenses', folder]);
+            for await (const [name, handle] of expDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Expenses/${folder}/${name}`; expAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const coDir = await ensurePath(base, ['Checkouts', folder]);
+            for await (const [name, handle] of coDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Checkouts/${folder}/${name}`; checkoutAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
         }
-        if (mounted) setLocalPays(arr.sort((a,b)=>b._file.localeCompare(a._file)));
+
+        if (!mounted) return;
+        rentAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        expAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        checkoutAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        setLocalRentList(rentAcc);
+        setLocalExpenses(expAcc);
+        setLocalCheckouts(checkoutAcc);
       } catch (e) {
-        // ignore if no storage or folder
+        setStorageConnected(false);
       }
     })();
     return () => { mounted = false; };
@@ -152,12 +185,12 @@ export default function LiveUpdate() {
 
     if (view === 'rentpayment') {
       const pays = remoteState.rentPayments || remoteState.rent_payments || [];
-      // if remote has none, fall back to local RentCollections for today
-      const effectivePays = (pays && pays.length) ? pays : localPays || [];
+      // if remote has none, fall back to local RentCollections (recent days)
+      const effectivePays = (pays && pays.length) ? pays : (localRentList || []);
       // apply dedicated rent filters (date range + search)
       const fromDate = rentFrom ? new Date(rentFrom) : null;
       const toDate = rentTo ? new Date(rentTo) : null;
-      const list = pays.filter(p => {
+      const list = effectivePays.filter(p => {
         // search match
         const matchesSearch = !rentSearch || JSON.stringify(p).toLowerCase().includes(rentSearch.toLowerCase());
         if (!matchesSearch) return false;
@@ -175,7 +208,7 @@ export default function LiveUpdate() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="text-lg font-semibold">Rent Payments</div>
-            <div className="text-sm text-gray-500">{effectivePays.length} total</div>
+            <div className="text-sm text-gray-500">{effectivePays.length} total {storageConnected ? '' : '(storage not connected)'}</div>
           </div>
 
           <div className="flex gap-2 mb-3 flex-wrap">
@@ -235,10 +268,10 @@ export default function LiveUpdate() {
   // if the path specifically points to a subpage, render that full page on the right
   const subpath = loc.pathname.split('/').pop();
   const renderSubpage = () => {
-    if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
-    if (subpath === 'checkout') return <CheckoutPage data={remoteState} />;
-    if (subpath === 'rentpayment') return <RentPaymentPage data={remoteState} />;
-    if (subpath === 'expenses') return <ExpensesPage data={remoteState} />;
+  if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
+  if (subpath === 'checkout') return <CheckoutPage data={ remoteState || { checkouts: localCheckouts } } />;
+  if (subpath === 'rentpayment') return <RentPaymentPage data={ remoteState || { rentPayments: localRentList } } />;
+  if (subpath === 'expenses') return <ExpensesPage data={ remoteState || { expenses: localExpenses } } />;
     return null;
   };
 
