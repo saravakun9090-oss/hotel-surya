@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { getBaseFolder, ensurePath } from './utils/fsAccess';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -73,6 +74,7 @@ export default function LiveUpdate() {
   const [rentSearch, setRentSearch] = useState('');
   const [rentFrom, setRentFrom] = useState('');
   const [rentTo, setRentTo] = useState('');
+  const [localPays, setLocalPays] = useState([]);
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -89,6 +91,33 @@ export default function LiveUpdate() {
     if (!s) return allRooms;
     return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
   }, [allRooms, search]);
+
+  // Load today's local RentCollections as a fallback when remote doesn't provide payments
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const today = new Date().toISOString().slice(0,10);
+        const rentDir = await ensurePath(base, ['RentCollections', today]);
+        const arr = [];
+        for await (const [name, handle] of rentDir.entries()) {
+          if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+          try {
+            const f = await handle.getFile();
+            const data = JSON.parse(await f.text());
+            data._file = name;
+            arr.push(data);
+          } catch (e) { continue; }
+        }
+        if (mounted) setLocalPays(arr.sort((a,b)=>b._file.localeCompare(a._file)));
+      } catch (e) {
+        // ignore if no storage or folder
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   // Build a per-floor layout and mark reservations for today
   const layoutFloors = useMemo(() => {
@@ -123,6 +152,8 @@ export default function LiveUpdate() {
 
     if (view === 'rentpayment') {
       const pays = remoteState.rentPayments || remoteState.rent_payments || [];
+      // if remote has none, fall back to local RentCollections for today
+      const effectivePays = (pays && pays.length) ? pays : localPays || [];
       // apply dedicated rent filters (date range + search)
       const fromDate = rentFrom ? new Date(rentFrom) : null;
       const toDate = rentTo ? new Date(rentTo) : null;
@@ -144,7 +175,7 @@ export default function LiveUpdate() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="text-lg font-semibold">Rent Payments</div>
-            <div className="text-sm text-gray-500">{pays.length} total</div>
+            <div className="text-sm text-gray-500">{effectivePays.length} total</div>
           </div>
 
           <div className="flex gap-2 mb-3 flex-wrap">
@@ -161,10 +192,10 @@ export default function LiveUpdate() {
                   <div className="font-medium">{p.name || p.payer || '—'} — Room {p.room || p.rooms || '—'}</div>
                   <div className="text-xs text-gray-600">{p.date || p.month || '—'}</div>
                 </div>
-                <div className="text-right font-semibold">{p.amount || p.total || '—'}</div>
+        <div className="text-right font-semibold">{p.amount || p.total || '—'}</div>
               </div>
             ))}
-            {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
+      {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
           </div>
         </div>
       );
