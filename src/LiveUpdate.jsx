@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-// no local FS access in LiveUpdate UI — rely only on remoteState
+import { getBaseFolder, ensurePath } from './utils/fsAccess';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -71,21 +71,26 @@ export default function LiveUpdate() {
   const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
   const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
-  const [guestSearch, setGuestSearch] = useState('');
   const [rentSearch, setRentSearch] = useState('');
   const [rentFrom, setRentFrom] = useState('');
   const [rentTo, setRentTo] = useState('');
+  const [localRentList, setLocalRentList] = useState([]);
+  const [localExpenses, setLocalExpenses] = useState([]);
+  const [localCheckouts, setLocalCheckouts] = useState([]);
+  const [storageConnected, setStorageConnected] = useState(false);
 
-  // effective dataset: use only remoteState (no local storage fallbacks)
+  // effective dataset: prefer non-empty remote arrays, otherwise fall back to local lists
   const effective = useMemo(() => {
     const e = {};
     e.floors = remoteState?.floors || {};
-    e.reservations = remoteState?.reservations || [];
-    e.checkouts = remoteState?.checkouts || [];
-    e.rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
-    e.expenses = remoteState?.expenses || [];
+    e.reservations = (remoteState?.reservations && remoteState.reservations.length) ? remoteState.reservations : [];
+    e.checkouts = (remoteState?.checkouts && remoteState.checkouts.length) ? remoteState.checkouts : localCheckouts;
+    if (remoteState?.rentPayments && remoteState.rentPayments.length) e.rentPayments = remoteState.rentPayments;
+    else if (remoteState?.rent_payments && remoteState.rent_payments.length) e.rentPayments = remoteState.rent_payments;
+    else e.rentPayments = localRentList;
+    e.expenses = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
     return e;
-  }, [remoteState]);
+  }, [remoteState, localRentList, localExpenses, localCheckouts]);
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -103,7 +108,62 @@ export default function LiveUpdate() {
     return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
   }, [allRooms, search]);
 
-  // No local storage scanning in LiveUpdate — rely on remoteState only
+  // Load recent local RentCollections, Expenses and Checkouts as fallbacks when remote doesn't provide data
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        setStorageConnected(!!base);
+        if (!base) return;
+
+        const rentAcc = [];
+        const expAcc = [];
+        const checkoutAcc = [];
+        // scan last 7 days
+        for (let d = 0; d < 7; d++) {
+          const dt = new Date();
+          dt.setDate(dt.getDate() - d);
+          const folder = dt.toISOString().slice(0,10);
+
+          try {
+            const rentDir = await ensurePath(base, ['RentCollections', folder]);
+            for await (const [name, handle] of rentDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `RentCollections/${folder}/${name}`; rentAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const expDir = await ensurePath(base, ['Expenses', folder]);
+            for await (const [name, handle] of expDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Expenses/${folder}/${name}`; expAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const coDir = await ensurePath(base, ['Checkouts', folder]);
+            for await (const [name, handle] of coDir.entries()) {
+              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
+              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Checkouts/${folder}/${name}`; checkoutAcc.push(data); } catch(e) { continue; }
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        if (!mounted) return;
+        rentAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        expAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        checkoutAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
+        setLocalRentList(rentAcc);
+        setLocalExpenses(expAcc);
+        setLocalCheckouts(checkoutAcc);
+      } catch (e) {
+        setStorageConnected(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   // Build a per-floor layout and mark reservations for today
   const layoutFloors = useMemo(() => {
@@ -119,30 +179,6 @@ export default function LiveUpdate() {
     }
     return lf;
   }, [floors, remoteState]);
-
-  // helpers for UI styling
-  const legendDot = (bg) => ({ display: 'inline-block', width: 10, height: 10, borderRadius: 6, background: bg, marginRight: 8, verticalAlign: 'middle' });
-  const roomBoxStyle = (r) => {
-    const base = {
-      height: 56,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 8,
-      fontWeight: 800,
-      cursor: 'pointer',
-      border: '1px solid rgba(0,0,0,0.06)'
-    };
-    if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.6)', color: '#3b2b00' };
-    if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.9)', color: '#013220' };
-    // free
-    return { ...base, background: '#ffffff', color: '#111' };
-  };
-
-  const handleRoomClick = (r) => {
-    // keep simple: navigate to reservations view for the room or just focus — currently no op
-    // you can replace this with navigation or modal open if desired
-  };
 
   const rightContent = () => {
     if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
@@ -161,7 +197,9 @@ export default function LiveUpdate() {
     }
 
     if (view === 'rentpayment') {
-      const effectivePays = effective.rentPayments || [];
+      // build effective pays (prefer non-empty remote arrays)
+      const paysRemote = (remoteState?.rentPayments && remoteState.rentPayments.length) ? remoteState.rentPayments : (remoteState?.rent_payments && remoteState.rent_payments.length ? remoteState.rent_payments : null);
+      const effectivePays = paysRemote ? paysRemote : (localRentList || []);
       // apply dedicated rent filters (date range + search)
       const fromDate = rentFrom ? new Date(rentFrom) : null;
       const toDate = rentTo ? new Date(rentTo) : null;
@@ -183,7 +221,7 @@ export default function LiveUpdate() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="text-lg font-semibold">Rent Payments</div>
-            <div className="text-sm text-gray-500">{effectivePays.length} total</div>
+            <div className="text-sm text-gray-500">{effectivePays.length} total {storageConnected ? '' : '(storage not connected)'}</div>
           </div>
 
           <div className="flex gap-2 mb-3 flex-wrap">
@@ -210,7 +248,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'expenses') {
-      const ex = effective.expenses || [];
+      const ex = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
       const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
@@ -287,39 +325,33 @@ export default function LiveUpdate() {
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Rooms grid */}
-        <div style={{ flex: 1 }}>
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
-
-            <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
-              <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
-              <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
-              <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
-            </div>
-
+        <div className="w-full md:w-80">
+          <div className="mb-2 text-sm text-gray-600">Room Layout (Today)</div>
+          <div className="card" style={{ padding: 14, maxHeight: '70vh', overflow: 'auto' }}>
             {loading && <div className="text-sm text-gray-500">Loading...</div>}
             {error && <div className="text-sm text-red-500">{error}</div>}
+            {Object.keys(layoutFloors).length === 0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
             {Object.keys(layoutFloors).map(floorNum => (
-              <div key={floorNum} style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-                  Floor {floorNum}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+              <div key={floorNum} style={{ marginBottom: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: 'var(--muted)' }}>Floor {floorNum}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
                   {layoutFloors[floorNum].map(r => (
                     <div
                       key={r.number}
-                      style={roomBoxStyle(r)}
-                      title={
-                        r.status === 'reserved'
-                          ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                          : r.status === 'occupied'
-                          ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                          : 'Free'
-                      }
-                      onClick={() => handleRoomClick(r)}
+                      className={`room ${r.status}`}
+                      onClick={() => { /* optional click */ }}
+                      style={{
+                        height: 48,
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 8,
+                        background: r.status === 'occupied' ? 'rgba(246, 85, 85, 0.08)' : r.status === 'reserved' ? 'rgba(255, 213, 128, 0.6)' : 'rgba(139, 224, 164, 0.6)',
+                        border: '1px solid rgba(0,0,0,0.06)'
+                      }}
                     >
-                      {r.number}
+                      {floorNum}{String(r.number).slice(-2)}
                     </div>
                   ))}
                 </div>
@@ -328,71 +360,9 @@ export default function LiveUpdate() {
           </div>
         </div>
 
-        {/* RIGHT: Current Guests card */}
-        <div style={{ flex: 1 }}>
-          <div className="card" style={{ padding: 14, marginTop: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontWeight: 800 }}>Current Guests</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>{(effective.checkouts || []).length} occupied</div>
-            </div>
-
-            {/* Search (full width) */}
-            <div style={{ marginBottom: 10 }}>
-              <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
-            </div>
-
-            {((effective.checkouts || []).length === 0) && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
-                {((effective.checkouts || []).filter(g => {
-                  const q = guestSearch.trim().toLowerCase();
-                  if (!q) return true;
-                  const name = String(g.guest?.name || g.name || '').toLowerCase();
-                  const rooms = (g.rooms || g.room || []);
-                  const roomsStr = Array.isArray(rooms) ? rooms.map(String).join(', ') : String(rooms);
-                  return name.includes(q) || roomsStr.includes(q);
-                })).map((g, idx) => {
-                  const name = g.guest?.name || g.name || 'Guest';
-                  const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
-                  const roomsArr = Array.isArray(g.rooms) ? g.rooms : (g.rooms ? [g.rooms] : (g.room ? [g.room] : []));
-                  return (
-                    <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
-                        {initials}
-                      </div>
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
-                              <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {name}
-                              </div>
-                              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                                Room {roomsArr.join(', ')}
-                              </div>
-                              {g.guest?.edited && (
-                                <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
-                          <div>Phone no: {g.guest?.contact || g.contact || '-'}</div>
-                          <div>Price: ₹{g.guest?.rate || g.rate || 0}/day</div>
-                          <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || g.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
-                          <div>Paid: ₹{g.totalPaid || g.total || g.paid || 0}</div>
-                        </div>
-                      </div>
-
-                      {/* no edit / open id buttons per request */}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+        <div className="flex-1">
+          <div className="border rounded p-3 max-h-[75vh] overflow-auto">
+            {renderSubpage() || rightContent()}
           </div>
         </div>
       </div>
