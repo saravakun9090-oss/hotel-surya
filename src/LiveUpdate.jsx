@@ -275,6 +275,17 @@ export default function LiveUpdate() {
     return null;
   };
 
+  // If user navigated directly to a subpage route, show it as a standalone page (no room layout)
+  if (['reservations', 'checkout', 'rentpayment', 'expenses'].includes(subpath)) {
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <div className="border rounded p-3 bg-white">
+          {renderSubpage()}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
