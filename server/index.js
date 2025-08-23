@@ -110,6 +110,42 @@ app.get('/api/state', async (req, res) => {
   res.json({ state: doc?.state || null });
 });
 
+// Return a fuller state view: prefer singleton state, otherwise aggregate from common collections
+app.get('/api/fullstate', async (req, res) => {
+  await ensureDb();
+  if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const doc = await col.findOne({ _id: 'singleton' });
+    if (doc && doc.state) return res.json({ state: doc.state });
+
+    const db = dbClient.db(DB_NAME);
+    // try reading common collections if they exist
+    const out = {};
+    const tryColl = async (name) => {
+      try {
+        const exists = await db.listCollections({ name }).hasNext();
+        if (!exists) return [];
+        return await db.collection(name).find().toArray();
+      } catch (e) {
+        return [];
+      }
+    };
+
+    out.checkins = await tryColl('Checkins');
+    out.checkouts = await tryColl('Checkouts');
+    out.reservations = await tryColl('Reservations');
+    out.rentPayments = await tryColl('RentCollections');
+    out.expenses = await tryColl('Expenses');
+    // also try to read a floors/documents collection if present
+    out.floors = (await tryColl('Floors'))[0] || null;
+
+    // If no data found, return empty state
+    return res.json({ state: { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 app.post('/api/state', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });

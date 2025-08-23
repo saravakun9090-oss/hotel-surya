@@ -24,9 +24,10 @@ function usePolling(url, interval = 2000) {
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(await res.text());
-        const json = await res.json();
-        if (!mounted) return;
-        setData(json.state || null);
+  const json = await res.json();
+  if (!mounted) return;
+  // accept either { state: {...} } or raw object
+  setData((json && typeof json === 'object' && 'state' in json) ? (json.state || null) : json || null);
         setLoading(false);
         setError(null);
       } catch (e) {
@@ -67,7 +68,7 @@ const RoomBox = ({ room, onClick }) => (
 
 export default function LiveUpdate() {
   const loc = useLocation();
-  const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
+  const { data: remoteState, loading, error } = usePolling(`${API_BASE}/fullstate`, 2500);
 
   // local fallback so LiveUpdate still shows data when the storage backend isn't available
   const [localState, setLocalState] = useState(() => {
@@ -120,7 +121,7 @@ export default function LiveUpdate() {
   // force fetch: immediate one-time fetch that updates local cache/state
   const forceFetch = async () => {
     try {
-      const res = await fetch(`${API_BASE}/state`);
+    const res = await fetch(`${API_BASE}/fullstate`);
       if (!res.ok) {
         const txt = await res.text();
         return alert('Fetch failed: ' + txt);
