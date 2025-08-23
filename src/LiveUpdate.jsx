@@ -155,13 +155,13 @@ export default function LiveUpdate() {
   // force fetch: immediate one-time fetch that updates local cache/state
   const forceFetch = async () => {
     try {
-    const res = await fetch(`${API_BASE}/fullstate`);
+  const res = await fetch(`${API_BASE}/fullstate`);
       if (!res.ok) {
         const txt = await res.text();
         return alert('Fetch failed: ' + txt);
       }
       const json = await res.json();
-      const s = json.state || null;
+      const s = (json && typeof json === 'object' && 'state' in json) ? (json.state || null) : json || null;
       if (s) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (_e) {}
         setLocalState(s);
@@ -195,7 +195,8 @@ export default function LiveUpdate() {
   }, [loc.pathname]);
   const [search, setSearch] = useState('');
 
-  const rawState = remoteState || localState || null;
+  // prefer a non-empty remoteState; if remoteState exists but is empty object, fall back to localState
+  const rawState = (remoteState && Object.keys(remoteState).length ? remoteState : (localState || null));
   const state = useMemo(() => {
     if (!rawState || !Object.keys(rawState).length) return generateDefaultState();
     // clone to avoid mutating source
@@ -204,6 +205,25 @@ export default function LiveUpdate() {
 
     // ensure floors present
     if (!s.floors || Object.keys(s.floors).length === 0) s.floors = generateDefaultState().floors;
+
+    // Detect malformed floor entries (PowerShell or other serialization may produce strings)
+    const isFloorMalformed = () => {
+      try {
+        for (const fk of Object.keys(s.floors || {})) {
+          const arr = s.floors[fk];
+          if (!Array.isArray(arr)) return true;
+          for (const it of arr) {
+            if (!it || typeof it !== 'object' || typeof it.number === 'undefined' || Number.isNaN(Number(it.number))) return true;
+          }
+        }
+      } catch (_e) { return true; }
+      return false;
+    };
+
+    if (isFloorMalformed()) {
+      // rebuild floors with default layout so merging guests works
+      s.floors = generateDefaultState().floors;
+    }
 
     // If the backend returned a top-level `guests` array (legacy shape), merge into floors so rooms render as occupied
     const guestsArr = s.guests || s.guestsList || [];
@@ -232,6 +252,45 @@ export default function LiveUpdate() {
         }
       }
     }
+
+    // Normalize any PowerShell-like string entries (e.g. "@{a=1; b=2}") into objects
+    const tryParsePS = (v) => {
+      if (typeof v !== 'string') return v;
+      const trim = v.trim();
+      if (!trim.startsWith('@{')) return v;
+      try {
+        // convert PowerShell hashtable string to JSON-ish: @{
+        let inner = trim.slice(2, -1); // remove '@{' and trailing '}'
+        // replace ';' separators with ',' and '=' with ':'
+        inner = inner.replace(/;\s*/g, ',').replace(/=\s*/g, ':');
+        // wrap keys and values in double quotes where appropriate
+        // add quotes around keys
+        inner = inner.replace(/([\w]+)\s*:\s*/g, '"$1":');
+        // ensure string values are quoted
+        inner = inner.replace(/:\s*([^,\}]+)/g, (m, p1) => {
+          const val = p1.trim();
+          if (/^\d+$/.test(val) || /^\d+\.\d+$/.test(val) || val === 'true' || val === 'false' || val === 'null') return ':' + val;
+          // escape double quotes
+          const escaped = val.replace(/"/g, '\\"');
+          return ':"' + escaped + '"';
+        });
+        const json = '{' + inner + '}';
+        return JSON.parse(json);
+      } catch (_e) {
+        return v;
+      }
+    };
+
+    const normalizeArray = (arr) => {
+      if (!Array.isArray(arr)) return arr || [];
+      return arr.map(item => (typeof item === 'string' ? tryParsePS(item) : item));
+    };
+
+    s.checkouts = normalizeArray(s.checkouts);
+    s.reservations = normalizeArray(s.reservations);
+    s.rentPayments = normalizeArray(s.rentPayments || s.rent_payments);
+    s.expenses = normalizeArray(s.expenses);
+    s.guests = normalizeArray(s.guests || s.guestsList);
 
     return s;
   }, [rawState]);

@@ -34,6 +34,18 @@ let dbClient;
 let col;
 let bucket;
 
+function generateDefaultFloors() {
+  const floors = {};
+  for (let f = 1; f <= 5; f++) {
+    floors[f] = [];
+    for (let r = 1; r <= 4; r++) {
+      const number = f * 100 + r;
+      floors[f].push({ number, status: 'free', guest: null, reservedFor: null, rate: null });
+    }
+  }
+  return floors;
+}
+
 async function initDb() {
   if (!MONGO_URI) {
     console.warn('MONGO_URI not set - mongo endpoints will fail');
@@ -184,6 +196,59 @@ app.post('/api/state', async (req, res) => {
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   // Accept either { state: {...} } or the raw object directly
   const payload = (req.body && typeof req.body === 'object' && 'state' in req.body) ? req.body.state : req.body || null;
+  // sanitize payload: ensure floors is well-formed and merge guests into floors if needed
+  try {
+    if (!payload || typeof payload !== 'object') {
+      // nothing to save
+    } else {
+      // ensure floors structure
+      let floorsOk = true;
+      if (!payload.floors || typeof payload.floors !== 'object') floorsOk = false;
+      else {
+        for (const k of Object.keys(payload.floors)) {
+          const arr = payload.floors[k];
+          if (!Array.isArray(arr)) { floorsOk = false; break; }
+          for (const it of arr) {
+            if (!it || typeof it !== 'object' || typeof it.number === 'undefined' || Number.isNaN(Number(it.number))) { floorsOk = false; break; }
+          }
+          if (!floorsOk) break;
+        }
+      }
+
+      if (!floorsOk) {
+        payload.floors = generateDefaultFloors();
+      }
+
+      // Merge guests (legacy shape) into floors so remote stored shape matches expectations
+      const guestsArr = Array.isArray(payload.guests) ? payload.guests : (Array.isArray(payload.guestsList) ? payload.guestsList : []);
+      if (Array.isArray(guestsArr) && guestsArr.length > 0) {
+        for (const g of guestsArr) {
+          const rooms = Array.isArray(g.room) ? g.room.map(Number) : [Number(g.room)];
+          for (const rn of rooms) {
+            for (const fk of Object.keys(payload.floors)) {
+              const floorArr = payload.floors[fk];
+              for (let i = 0; i < floorArr.length; i++) {
+                if (Number(floorArr[i].number) === Number(rn)) {
+                  floorArr[i] = {
+                    ...floorArr[i],
+                    status: 'occupied',
+                    guest: {
+                      name: g.name || g.fullName || g.payer || '',
+                      contact: g.contact || g.phone || '',
+                      checkIn: g.checkIn || g.checkInDate || g.createdAt || null,
+                      rate: g.rate || floorArr[i].rate || null,
+                      ...g
+                    }
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (_err) { /* best-effort sanitize */ }
+
   await col.updateOne({ _id: 'singleton' }, { $set: { state: payload, updatedAt: new Date() } });
   // broadcast to SSE clients the new state (raw)
   try { broadcastState(payload); } catch (_e) { /* ignore */ }
