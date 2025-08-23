@@ -71,6 +71,7 @@ export default function LiveUpdate() {
   const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
   const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
+  const [guestSearch, setGuestSearch] = useState('');
   const [rentSearch, setRentSearch] = useState('');
   const [rentFrom, setRentFrom] = useState('');
   const [rentTo, setRentTo] = useState('');
@@ -180,6 +181,61 @@ export default function LiveUpdate() {
     return lf;
   }, [floors, remoteState]);
 
+  // Group occupied rooms by guest (name + checkIn) similar to CheckIn component
+  const occupiedGroups = useMemo(() => {
+    const map = new Map();
+    const todayISO = new Date().toISOString().slice(0,10);
+    const occ = allRooms.filter(r => r.status === 'occupied');
+    for (const r of occ) {
+      const name = String(r.guest?.name || '').trim();
+      const checkIn = (r.guest?.checkIn || '').slice(0,10) || todayISO;
+      const key = `${name.toLowerCase()}::${checkIn}`;
+      if (!map.has(key)) map.set(key, { guest: r.guest || {}, rooms: [] , _key: key });
+      const g = map.get(key);
+      if (!g.rooms.includes(r.number)) g.rooms.push(r.number);
+      // keep latest guest info
+      g.guest = { ...g.guest, ...(r.guest || {}) };
+    }
+    return Array.from(map.values()).map(g => ({ guest: g.guest, rooms: (g.rooms||[]).sort((a,b)=>a-b), _key: g._key }));
+  }, [allRooms]);
+
+  // Build payments map from effective.rentPayments: sum numeric amounts by guest group
+  const paymentsMap = useMemo(() => {
+    const map = {};
+    const pays = effective.rentPayments || [];
+    if (!pays || !pays.length) return map;
+    // helper to parse numeric amount
+    const parseAmt = (v) => {
+      if (v == null) return 0;
+      if (typeof v === 'number') return v;
+      const s = String(v).replace(/[^0-9.-]+/g, '');
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    for (const p of pays) {
+      const payer = String(p.name || p.payer || '').trim().toLowerCase();
+      // rooms could be '101' or [101]
+      const pRooms = Array.isArray(p.room || p.rooms) ? (p.room || p.rooms).map(Number) : (p.room ? [Number(p.room)] : []);
+      const amt = parseAmt(p.amount ?? p.total ?? p.pay ?? p.value ?? 0);
+
+      // try to match payments to occupiedGroups by name or room intersection
+      for (const g of occupiedGroups) {
+        const gname = String(g.guest?.name || '').trim().toLowerCase();
+        const roomsSet = new Set((g.rooms || []).map(Number));
+        let matched = false;
+        if (gname && payer && gname === payer) matched = true;
+        if (!matched && pRooms.length) {
+          for (const pr of pRooms) if (roomsSet.has(pr)) { matched = true; break; }
+        }
+        if (matched) {
+          map[g._key] = (map[g._key] || 0) + amt;
+        }
+      }
+    }
+    return map;
+  }, [effective.rentPayments, occupiedGroups]);
+
   const rightContent = () => {
     if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
   if (view === 'reservations') {
@@ -286,6 +342,74 @@ export default function LiveUpdate() {
       </div>
     );
   };
+      // default: show grouped Current Guests card list (similar to Check-In page)
+      const q = (guestSearch || '').trim().toLowerCase();
+      const filtered = occupiedGroups.filter(g => {
+        if (!q) return true;
+        const name = String(g.guest?.name || '').toLowerCase();
+        const rooms = (g.rooms || []).map(String).join(', ');
+        return name.includes(q) || rooms.includes(q);
+      });
+
+      return (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontWeight: 800 }}>Current Guests</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
+          </div>
+
+          {filtered.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
+              {filtered.map((g, idx) => {
+                const name = g.guest?.name || 'Guest';
+                const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
+                return (
+                  <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
+                      {initials}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {(g.rooms || []).join(', ')}</div>
+                            {g.guest?.edited && (
+                              <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginTop: 8, fontSize: 12 }}>
+                        <div>Phone no: {g.guest.contact}</div>
+                        <div>Price: ₹{g.guest?.rate || 0}/day</div>
+                        <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
+                        <div>Paid: ₹{paymentsMap[g._key] || 0}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
+                      {scannedMap[g._key] ? (
+                        <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
+                      ) : (
+                        <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.18)' }} onClick={() => attachScanToGuest(g)}>⬆️ Upload ID</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
 
   // if the path specifically points to a subpage, render that full page on the right
   const subpath = loc.pathname.split('/').pop();
