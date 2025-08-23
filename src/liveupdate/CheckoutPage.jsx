@@ -1,20 +1,58 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
+
 export default function CheckoutPage({ data }) {
-  const all = (data?.checkouts || data?.checkoutsList || []).slice().reverse();
+  const [search, setSearch] = useState('');
+  const all = useMemo(() => (data?.checkouts || data?.checkoutsList || []).slice().reverse(), [data]);
+
+  const filtered = useMemo(() => {
+    const q = (search || '').trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(c => {
+      return String(c.name || c.guest?.name || '').toLowerCase().includes(q)
+        || String(c.room || c.rooms || '').toLowerCase().includes(q)
+        || String(c.checkInDate || c.checkIn || '').toLowerCase().includes(q)
+        || String(c.checkOutDate || c.checkOut || '').toLowerCase().includes(q);
+    });
+  }, [all, search]);
+
   return (
     <div>
-      <h2 className="text-lg font-medium mb-2">Checkouts / Active Stays</h2>
-      <div className="mb-3">
-        <input placeholder="Search checkouts" className="w-full px-2 py-1 border rounded text-sm" />
+      <div>
+        <div style={{ paddingBottom: 10 }} className="title">Checkouts / Active Stays</div>
       </div>
-      <div className="space-y-2">
-        {all.map((c, i) => (
-          <div key={i} className="p-2 border rounded">
-            <div className="font-medium">Room {c.room || c.rooms} — {c.name || c.guest?.name}</div>
-            <div className="text-xs text-gray-600">Check-in: {c.checkInDate || c.checkIn} • Check-out: {c.checkOutDate || c.checkOutDate}</div>
+
+      {/* Search box */}
+      <div style={{ marginBottom: 12 }}>
+        <input
+          className="input"
+          placeholder="Search checkouts by name, room, or date"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      <div className="list">
+        {(!filtered || filtered.length === 0) && (
+          <div style={{ color: 'var(--muted)' }}>No checkouts</div>
+        )}
+
+        {filtered.map((c, i) => (
+          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                {c.name || c.guest?.name} <span style={{ color: 'var(--muted)', fontWeight: 700 }}>• Room {c.room || c.rooms}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                Check-in: {c.checkInDate || c.checkIn} — Check-out: {c.checkOutDate || c.checkOut}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn primary" onClick={() => { /* view details */ }}>Details</button>
+              <button className="btn ghost" onClick={() => { /* delete action */ }}>Delete</button>
+            </div>
           </div>
         ))}
-        {all.length===0 && <div className="text-sm text-gray-500">No checkouts</div>}
       </div>
     </div>
   );
