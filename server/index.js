@@ -12,6 +12,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Simple SSE clients set for live updates
+const sseClients = new Set();
+
+function broadcastState(state) {
+  const payload = JSON.stringify({ state });
+  for (const res of sseClients) {
+    try {
+      res.write(`data: ${payload}\n\n`);
+    } catch (_e) {
+      // ignore individual client write errors
+    }
+  }
+}
+
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME || 'hotel_surya';
 const COLLECTION = process.env.COLLECTION || 'app_state';
@@ -112,38 +126,53 @@ app.get('/api/state', async (req, res) => {
   res.json({ state: doc?.state || null });
 });
 
+// Server-Sent Events endpoint for live updates
+app.get('/api/stream', async (req, res) => {
+  // set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive'
+  });
+  // send a ping comment to keep connection alive
+  res.write(': connected\n\n');
+  sseClients.add(res);
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
 // Return a fuller state view: prefer singleton state, otherwise aggregate from common collections
 app.get('/api/fullstate', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   try {
-    const doc = await col.findOne({ _id: 'singleton' });
-    if (doc && doc.state) return res.json({ state: doc.state });
-
-    const db = dbClient.db(DB_NAME);
-    // try reading common collections if they exist
-    const out = {};
-    const tryColl = async (name) => {
-      try {
-        const exists = await db.listCollections({ name }).hasNext();
-        if (!exists) return [];
-        return await db.collection(name).find().toArray();
-      } catch (_e) {
-        void _e;
-        return [];
-      }
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const db = dbClient.db(DB_NAME);
+      const out = {};
+      const tryColl = async (name) => {
+        try {
+          const exists = await db.listCollections({ name }).hasNext();
+          if (!exists) return [];
+          return await db.collection(name).find().toArray();
+        } catch (_e) {
+          void _e;
+          return [];
+        }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
     };
 
-    out.checkins = await tryColl('Checkins');
-    out.checkouts = await tryColl('Checkouts');
-    out.reservations = await tryColl('Reservations');
-    out.rentPayments = await tryColl('RentCollections');
-    out.expenses = await tryColl('Expenses');
-    // also try to read a floors/documents collection if present
-    out.floors = (await tryColl('Floors'))[0] || null;
-
-    // If no data found, return empty state
-    return res.json({ state: { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses } });
+    const state = await buildFullState();
+    return res.json({ state });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }
@@ -154,7 +183,173 @@ app.post('/api/state', async (req, res) => {
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   const { state } = req.body || {};
   await col.updateOne({ _id: 'singleton' }, { $set: { state, updatedAt: new Date() } });
+  // broadcast to SSE clients the new state
+  try {
+    broadcastState(state);
+  } catch (_e) { /* ignore */ }
   res.json({ ok: true });
+});
+
+// Insert a rent entry into RentCollections and broadcast updated fullstate
+app.post('/api/rent', async (req, res) => {
+  await ensureDb();
+  if (!dbClient) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const data = req.body || {};
+    const db = dbClient.db(DB_NAME);
+    const coll = db.collection('RentCollections');
+    const inserted = await coll.insertOne({ ...data, createdAt: new Date() });
+    // build and broadcast fullstate
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const out = {};
+      const tryColl = async (name) => {
+        try { const exists = await db.listCollections({ name }).hasNext(); if (!exists) return []; return await db.collection(name).find().toArray(); } catch (_e) { void _e; return []; }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
+    };
+    const state = await buildFullState();
+    try { broadcastState(state); } catch (_e) { /* ignore */ }
+    res.json({ ok: true, id: inserted.insertedId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Insert an expense entry into Expenses and broadcast updated fullstate
+app.post('/api/expense', async (req, res) => {
+  await ensureDb();
+  if (!dbClient) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const data = req.body || {};
+    const db = dbClient.db(DB_NAME);
+    const coll = db.collection('Expenses');
+    const inserted = await coll.insertOne({ ...data, createdAt: new Date() });
+    // build and broadcast fullstate
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const out = {};
+      const tryColl = async (name) => {
+        try { const exists = await db.listCollections({ name }).hasNext(); if (!exists) return []; return await db.collection(name).find().toArray(); } catch (_e) { void _e; return []; }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
+    };
+    const state = await buildFullState();
+    try { broadcastState(state); } catch (_e) { /* ignore */ }
+    res.json({ ok: true, id: inserted.insertedId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Insert a reservation into Reservations and broadcast updated fullstate
+app.post('/api/reservation', async (req, res) => {
+  await ensureDb();
+  if (!dbClient) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const data = req.body || {};
+    const db = dbClient.db(DB_NAME);
+    const coll = db.collection('Reservations');
+    const inserted = await coll.insertOne({ ...data, createdAt: new Date() });
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const out = {};
+      const tryColl = async (name) => {
+        try { const exists = await db.listCollections({ name }).hasNext(); if (!exists) return []; return await db.collection(name).find().toArray(); } catch (_e) { void _e; return []; }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
+    };
+    const state = await buildFullState();
+    try { broadcastState(state); } catch (_e) { /* ignore */ }
+    res.json({ ok: true, id: inserted.insertedId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Insert a checkin into Checkins and broadcast updated fullstate
+app.post('/api/checkin', async (req, res) => {
+  await ensureDb();
+  if (!dbClient) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const data = req.body || {};
+    const db = dbClient.db(DB_NAME);
+    const coll = db.collection('Checkins');
+    const inserted = await coll.insertOne({ ...data, createdAt: new Date() });
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const out = {};
+      const tryColl = async (name) => {
+        try { const exists = await db.listCollections({ name }).hasNext(); if (!exists) return []; return await db.collection(name).find().toArray(); } catch (_e) { void _e; return []; }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
+    };
+    const state = await buildFullState();
+    try { broadcastState(state); } catch (_e) { /* ignore */ }
+    res.json({ ok: true, id: inserted.insertedId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Insert a checkout into Checkouts and broadcast updated fullstate
+app.post('/api/checkout', async (req, res) => {
+  await ensureDb();
+  if (!dbClient) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    const data = req.body || {};
+    const db = dbClient.db(DB_NAME);
+    const coll = db.collection('Checkouts');
+    const inserted = await coll.insertOne({ ...data, createdAt: new Date() });
+    const buildFullState = async () => {
+      const doc = await col.findOne({ _id: 'singleton' });
+      if (doc && doc.state) return doc.state;
+      const out = {};
+      const tryColl = async (name) => {
+        try { const exists = await db.listCollections({ name }).hasNext(); if (!exists) return []; return await db.collection(name).find().toArray(); } catch (_e) { void _e; return []; }
+      };
+      out.checkins = await tryColl('Checkins');
+      out.checkouts = await tryColl('Checkouts');
+      out.reservations = await tryColl('Reservations');
+      out.rentPayments = await tryColl('RentCollections');
+      out.expenses = await tryColl('Expenses');
+      out.floors = (await tryColl('Floors'))[0] || {};
+      return { floors: out.floors || {}, checkins: out.checkins, checkouts: out.checkouts, reservations: out.reservations, rentPayments: out.rentPayments, expenses: out.expenses };
+    };
+    const state = await buildFullState();
+    try { broadcastState(state); } catch (_e) { /* ignore */ }
+    res.json({ ok: true, id: inserted.insertedId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
 });
 
 const PORT = process.env.PORT || 4000;

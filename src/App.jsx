@@ -59,7 +59,18 @@ function loadState() {
   if (!raw) { return generateDefault(); }
   try { return JSON.parse(raw); } catch (_e) { return generateDefault(); }
 }
-function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function saveState(state) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_e) { /* ignore */ }
+  try {
+    const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+    // fire-and-forget POST to persist state remotely and trigger SSE
+    fetch(`${base}/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state })
+    }).catch(() => {});
+  } catch (_e) { /* ignore */ }
+}
 
 // ---------- Small UI components ----------
 const Sidebar = () => (
@@ -1218,6 +1229,10 @@ function CheckIn({ state, setState, locationState }) {
   const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
   const roomsKey = roomsArr.join('_');
   await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
+  try {
+    const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+    fetch(`${base}/checkin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(guest) }).catch(_e => console.warn('remote checkin persist failed', _e));
+  } catch (_e) { /* ignore */ }
 
     const year = String(now.getFullYear());
     const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
@@ -1944,6 +1959,10 @@ function CheckOut({ state, setState }) {
     const roomsKey = rooms.join('_');
     const checkoutFileName = `checkout-${safeName}-${roomsKey}-${checkInDate}.json`;
     await writeJSON(checkoutDir, checkoutFileName, data);
+    try {
+      const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+      fetch(`${base}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(_e => console.warn('remote checkout persist failed', _e));
+    } catch (_e) { /* ignore */ }
 
     await checkinDir.removeEntry(fileName);
   }
@@ -2486,6 +2505,11 @@ async function persistReservation(res) {
     const safe = String(res.name).replace(/[^\w\-]+/g, '_'); // sanitize filename
     await writeJSON(dir, `reservation-${res.room}-${safe}.json`, res);
     console.log("Reservation saved to disk:", res);
+    // Also attempt to persist reservation remotely so LiveUpdate sees it across devices
+    try {
+      const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+      fetch(`${base}/reservation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(res) }).catch(_e => console.warn('remote reservation persist failed', _e));
+    } catch (_e) { /* ignore */ }
   } catch (err) {
     console.error("Failed to save reservation to disk:", err);
   }
@@ -3298,6 +3322,11 @@ const [expMsg, setExpMsg] = useState("");
       await writeJSON(rentDir, fileName, rentData);
       // ✅ Refresh today's lists instantly
       await loadTodayData();
+      // Also attempt to persist to remote Mongo so LiveUpdate sees it across devices
+      try {
+        const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+        fetch(`${base}/rent`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rentData) }).catch(_e => console.warn('remote rent persist failed', _e));
+      } catch (_e) { /* ignore */ }
     } catch (err) {
       console.warn("Failed to save rent", err);
       alert("Failed to save rent.");
@@ -3346,6 +3375,10 @@ const [expMsg, setExpMsg] = useState("");
     await writeJSON(expDir, fileName, expenseData);
     // 🔹 Refresh today's lists instantly
     await loadTodayData();
+    try {
+      const base = (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__ : '/api';
+      fetch(`${base}/expense`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(expenseData) }).catch(_e => console.warn('remote expense persist failed', _e));
+    } catch (_e) { /* ignore */ }
     
   } catch (err) {
     console.warn("Failed to save expense", err);
@@ -3948,31 +3981,59 @@ function KPI({ title, value, color }) {
 // ---------- App ----------
 export default function App() {
   const [state, setState] = useState(loadState());
-  useEffect(() => { 
-    saveState(state); 
-    // attempt to write to remote (non-blocking)
+  // Persist state locally and attempt remote persist on every change
+  useEffect(() => {
+    saveState(state); // keep local cache
     (async () => {
       try {
-        // prefer a direct save to the backend state endpoint when available
         const mongo = await import('./services/mongoSync');
-        const ok = await (mongo.testConnection ? mongo.testConnection() : Promise.resolve(false));
-        if (ok) {
-          try {
-            await mongo.saveStateToMongo(state);
-          } catch (err) {
-            console.warn('saveStateToMongo failed, falling back to queued save', err);
-            const { saveAll } = await import('./services/dualSync');
-            await saveAll(state).catch(e => console.warn('remote save (queued) failed', e));
-          }
-        } else {
+        try {
+          await mongo.saveStateToMongo(state);
+        } catch (err) {
+          // fallback to queued save
           const { saveAll } = await import('./services/dualSync');
           await saveAll(state).catch(e => console.warn('remote save (queued) failed', e));
         }
       } catch (_e) {
-        console.warn('remote save logic failed', _e);
+        // dynamic import failed or no API configured
+        try {
+          const { saveAll } = await import('./services/dualSync');
+          await saveAll(state).catch(e => console.warn('remote save (queued) failed', e));
+        } catch (__e) { /* ignore */ }
       }
     })();
   }, [state]);
+
+  // On startup, try to load remote state and subscribe to server-sent events
+  useEffect(() => {
+    let es;
+    (async () => {
+      try {
+        const mongo = await import('./services/mongoSync');
+        const ok = await (mongo.testConnection ? mongo.testConnection() : Promise.resolve(false));
+        if (ok) {
+          try {
+            const remote = await mongo.loadStateFromMongo();
+            if (remote) {
+              setState(remote);
+            }
+          } catch (_e) { /* ignore */ }
+          // subscribe to SSE stream for live updates
+          try {
+            es = new EventSource((typeof window !== 'undefined' && window.__MONGO_API_BASE__) ? window.__MONGO_API_BASE__.replace(/\/api$/, '') + '/api/stream' : '/api/stream');
+            es.onmessage = (ev) => {
+              try {
+                const j = JSON.parse(ev.data);
+                if (j?.state) setState(j.state);
+              } catch (_e) { /* ignore */ }
+            };
+            es.onerror = () => { try { es.close(); } catch (_e) {} };
+          } catch (_e) { /* ignore SSE errors */ }
+        }
+      } catch (_e) { /* ignore */ }
+    })();
+    return () => { if (es) try { es.close(); } catch (_e) {} };
+  }, []);
 
   useEffect(() => {
   (async () => {

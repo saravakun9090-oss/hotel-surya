@@ -82,6 +82,29 @@ export default function LiveUpdate() {
   const loc = useLocation();
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/fullstate`, 2500);
 
+  // Subscribe to SSE stream for immediate remote updates
+  useEffect(() => {
+    let evtSource;
+    try {
+      evtSource = new EventSource(`${API_BASE}/stream`);
+      evtSource.onmessage = (e) => {
+        try {
+          const json = JSON.parse(e.data);
+          if (json?.state) {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(json.state)); } catch (_e) {}
+            setLocalState(json.state);
+          }
+        } catch (_e) { /* malformed event */ }
+      };
+      evtSource.onerror = () => {
+        try { evtSource.close(); } catch (_e) {}
+      };
+    } catch (_e) {
+      // EventSource not available or failed — continue polling fallback
+    }
+    return () => { if (evtSource) try { evtSource.close(); } catch (_e) {} };
+  }, []);
+
   // local fallback so LiveUpdate still shows data when the storage backend isn't available
   const [localState, setLocalState] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (_e) { void _e; return null; }
