@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { getBaseFolder, ensurePath, writeFile, readJSONFile, writeJSON } from './utils/fsAccess';
+import { getBaseFolder, ensurePath } from './utils/fsAccess';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -181,173 +181,28 @@ export default function LiveUpdate() {
     return lf;
   }, [floors, remoteState]);
 
-  // Group occupied rooms by guest (name + checkIn) similar to CheckIn component
-  const occupiedGroups = useMemo(() => {
-    const map = new Map();
-    const todayISO = new Date().toISOString().slice(0,10);
-    const occ = allRooms.filter(r => r.status === 'occupied');
-    for (const r of occ) {
-      const name = String(r.guest?.name || '').trim();
-      const checkIn = (r.guest?.checkIn || '').slice(0,10) || todayISO;
-      const key = `${name.toLowerCase()}::${checkIn}`;
-      if (!map.has(key)) map.set(key, { guest: r.guest || {}, rooms: [] , _key: key });
-      const g = map.get(key);
-      if (!g.rooms.includes(r.number)) g.rooms.push(r.number);
-      // keep latest guest info
-      g.guest = { ...g.guest, ...(r.guest || {}) };
-    }
-    return Array.from(map.values()).map(g => ({ guest: g.guest, rooms: (g.rooms||[]).sort((a,b)=>a-b), _key: g._key }));
-  }, [allRooms]);
-
-  // Build payments map from effective.rentPayments: sum numeric amounts by guest group
-  const paymentsMap = useMemo(() => {
-    const map = {};
-    const pays = effective.rentPayments || [];
-    if (!pays || !pays.length) return map;
-    // helper to parse numeric amount
-    const parseAmt = (v) => {
-      if (v == null) return 0;
-      if (typeof v === 'number') return v;
-      const s = String(v).replace(/[^0-9.-]+/g, '');
-      const n = parseFloat(s);
-      return Number.isFinite(n) ? n : 0;
+  // helpers for UI styling
+  const legendDot = (bg) => ({ display: 'inline-block', width: 10, height: 10, borderRadius: 6, background: bg, marginRight: 8, verticalAlign: 'middle' });
+  const roomBoxStyle = (r) => {
+    const base = {
+      height: 56,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 8,
+      fontWeight: 800,
+      cursor: 'pointer',
+      border: '1px solid rgba(0,0,0,0.06)'
     };
-
-    for (const p of pays) {
-      const payer = String(p.name || p.payer || '').trim().toLowerCase();
-      // rooms could be '101' or [101]
-      const pRooms = Array.isArray(p.room || p.rooms) ? (p.room || p.rooms).map(Number) : (p.room ? [Number(p.room)] : []);
-      const amt = parseAmt(p.amount ?? p.total ?? p.pay ?? p.value ?? 0);
-
-      // try to match payments to occupiedGroups by name or room intersection
-      for (const g of occupiedGroups) {
-        const gname = String(g.guest?.name || '').trim().toLowerCase();
-        const roomsSet = new Set((g.rooms || []).map(Number));
-        let matched = false;
-        if (gname && payer && gname === payer) matched = true;
-        if (!matched && pRooms.length) {
-          for (const pr of pRooms) if (roomsSet.has(pr)) { matched = true; break; }
-        }
-        if (matched) {
-          map[g._key] = (map[g._key] || 0) + amt;
-        }
-      }
-    }
-    return map;
-  }, [effective.rentPayments, occupiedGroups]);
-
-  // scannedMap and utilities (mark which guest groups have a saved scanned ID)
-  const [scannedMap, setScannedMap] = useState({});
-
-  const groupKey = (group) => `${String(group.guest?.name||'').toLowerCase()}::${(group.guest?.checkIn||'').slice(0,10)}`;
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const base = await getBaseFolder();
-        if (!base) return;
-        const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
-        const newMap = {};
-
-        async function recurse(dir, safeQuery, foundObj) {
-          for await (const [entryName, entryHandle] of dir.entries()) {
-            if (!mounted) return;
-            if (entryHandle.kind === 'directory') {
-              await recurse(entryHandle, safeQuery, foundObj);
-              if (foundObj.found) return;
-            } else if (entryHandle.kind === 'file') {
-              if (entryName.toLowerCase().includes(safeQuery)) { foundObj.found = entryHandle; return; }
-            }
-          }
-        }
-
-        for (const g of occupiedGroups) {
-          const safe = String(g.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-          const found = { found: null };
-          try { await recurse(scannedRoot, safe, found); } catch (e) { /* ignore */ }
-          if (found.found) newMap[g._key] = true;
-        }
-
-        if (!mounted) return;
-        setScannedMap(m => ({ ...m, ...newMap }));
-      } catch (e) {
-        // ignore
-      }
-    })();
-    return () => { mounted = false; };
-  }, [occupiedGroups]);
-
-  // Open a preview of scanned ID for a guest group (opens in new tab)
-  const openGuestPreview = async (group) => {
-    try {
-      const base = await getBaseFolder();
-      if (!base) return alert('Storage not connected');
-      const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
-      const safe = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-      let foundHandle = null;
-
-      async function recurse(dir) {
-        for await (const [entryName, entryHandle] of dir.entries()) {
-          if (entryHandle.kind === 'directory') { const r = await recurse(entryHandle); if (r) return r; }
-          else if (entryHandle.kind === 'file') {
-            if (entryName.toLowerCase().includes(safe)) return entryHandle;
-          }
-        }
-        return null;
-      }
-
-      foundHandle = await recurse(scannedRoot);
-      if (!foundHandle) return alert('No scanned document found for this guest');
-      const file = await foundHandle.getFile();
-      const url = URL.createObjectURL(file);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } catch (err) {
-      console.warn('Preview open failed', err);
-      alert('Failed to open scanned document');
-    }
+    if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.6)', color: '#3b2b00' };
+    if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.9)', color: '#013220' };
+    // free
+    return { ...base, background: '#ffffff', color: '#111' };
   };
 
-  // Attach a scanned file to a guest: simple picker -> save under today's ScannedDocuments folder
-  const attachScanToGuest = async (group) => {
-    try {
-      const base = await getBaseFolder();
-      if (!base) return alert('Storage not connected');
-      // pick file
-      let file = null;
-      if (window.showOpenFilePicker) {
-        try {
-          const [handle] = await window.showOpenFilePicker({ multiple: false });
-          file = await handle.getFile();
-        } catch (e) { return; }
-      } else {
-        const picked = await new Promise((resolve) => {
-          const input = document.createElement('input');
-          input.type = 'file'; input.accept = 'image/*,.pdf'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
-          document.body.appendChild(input); input.click(); setTimeout(() => document.body.removeChild(input), 1000);
-        });
-        if (!picked) return; file = picked;
-      }
-
-      const now = new Date();
-      const todayISOstr = now.toISOString().slice(0,10);
-      const year = String(now.getFullYear());
-      const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
-      const dateFolder = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
-      const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
-      const safeName = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase() || 'guest';
-      const roomsKey = (group.rooms || []).join('_') || 'rooms';
-      const rawExt = (file.name && file.name.includes('.')) ? file.name.split('.').pop() : 'jpg';
-      const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0,8) || 'jpg';
-      const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
-      await writeFile(scansDir, newFileName, file);
-      setScannedMap(m => ({ ...m, [group._key || groupKey(group)]: true }));
-      alert('Scanned file saved');
-    } catch (err) {
-      console.warn('Attach scan failed', err);
-      alert('Failed to attach scan: ' + (err?.message || String(err)));
-    }
+  const handleRoomClick = (r) => {
+    // keep simple: navigate to reservations view for the room or just focus — currently no op
+    // you can replace this with navigation or modal open if desired
   };
 
   const rightContent = () => {
@@ -431,143 +286,31 @@ export default function LiveUpdate() {
       );
     }
 
-    // default: show grouped Current Guests card list (similar to Check-In page)
-    const q = (guestSearch || '').trim().toLowerCase();
-    const filtered = occupiedGroups.filter(g => {
-      if (!q) return true;
-      const name = String(g.guest?.name || '').toLowerCase();
-      const rooms = (g.rooms || []).map(String).join(', ');
-      return name.includes(q) || rooms.includes(q);
-    });
-
+    // default: checkout view
+    // prefer effective.checkouts when available (from remote or local fallback)
+    const effectiveCheckouts = effective.checkouts || [];
+    // If effectiveCheckouts contains data, use it; otherwise fall back to occupied rooms for active stays
+    let list = [];
+    if (effectiveCheckouts.length) {
+      // normalize checkouts into items with name and room fields for searching
+      list = effectiveCheckouts.filter(c => (String(c.name || c.guest?.name || c.room || c.rooms) || '').toLowerCase().includes(search.toLowerCase()));
+    } else {
+      const occupied = allRooms.filter(r => r.status === 'occupied');
+      list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
+    }
     return (
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 800 }}>Current Guests</div>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
-        </div>
-
-        {filtered.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
-            {filtered.map((g, idx) => {
-              const name = g.guest?.name || 'Guest';
-              const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
-              return (
-                <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
-                    {initials}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {(g.rooms || []).join(', ')}</div>
-                          {g.guest?.edited && (
-                            <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginTop: 8, fontSize: 12 }}>
-                      <div>Phone no: {g.guest.contact}</div>
-                      <div>Price: ₹{g.guest?.rate || 0}/day</div>
-                      <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
-                      <div>Paid: ₹{paymentsMap[g._key] || 0}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
-                    {scannedMap[g._key] ? (
-                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
-                    ) : (
-                      <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.18)' }} onClick={() => attachScanToGuest(g)}>⬆️ Upload ID</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        <div className="text-sm text-gray-600 mb-2">Checkouts / Active Stays</div>
+        {list.map((r) => (
+          <div key={r.number} className="p-2 border-b">
+            <div className="font-medium">Room {r.number} — {r.guest?.name}</div>
+            <div className="text-xs text-gray-600">Contact: {r.guest?.contact || '—'} • Rate: {r.guest?.rate || '—'}</div>
           </div>
-        </div>
+        ))}
+        {list.length===0 && <div className="p-2 text-sm text-gray-500">No active checkouts</div>}
       </div>
     );
   };
-      // default: show grouped Current Guests card list (similar to Check-In page)
-      const q = (guestSearch || '').trim().toLowerCase();
-      const filtered = occupiedGroups.filter(g => {
-        if (!q) return true;
-        const name = String(g.guest?.name || '').toLowerCase();
-        const rooms = (g.rooms || []).map(String).join(', ');
-        return name.includes(q) || rooms.includes(q);
-      });
-
-      return (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ fontWeight: 800 }}>Current Guests</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
-          </div>
-
-          <div style={{ marginBottom: 10 }}>
-            <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
-          </div>
-
-          {filtered.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
-              {filtered.map((g, idx) => {
-                const name = g.guest?.name || 'Guest';
-                const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
-                return (
-                  <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
-                      {initials}
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {(g.rooms || []).join(', ')}</div>
-                            {g.guest?.edited && (
-                              <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginTop: 8, fontSize: 12 }}>
-                        <div>Phone no: {g.guest.contact}</div>
-                        <div>Price: ₹{g.guest?.rate || 0}/day</div>
-                        <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
-                        <div>Paid: ₹{paymentsMap[g._key] || 0}</div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120, alignItems: 'flex-end' }}>
-                      {scannedMap[g._key] ? (
-                        <button className="btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => openGuestPreview(g)}>📎 Open ID</button>
-                      ) : (
-                        <button className="btn" style={{ padding: '6px 10px', fontSize: 13, background: 'rgba(239,68,68,0.08)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.18)' }} onClick={() => attachScanToGuest(g)}>⬆️ Upload ID</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      );
 
   // if the path specifically points to a subpage, render that full page on the right
   const subpath = loc.pathname.split('/').pop();
@@ -607,33 +350,39 @@ export default function LiveUpdate() {
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
-        <div className="w-full md:w-80">
-          <div className="mb-2 text-sm text-gray-600">Room Layout (Today)</div>
-          <div className="card" style={{ padding: 14, maxHeight: '70vh', overflow: 'auto' }}>
+        {/* LEFT: Rooms grid */}
+        <div style={{ flex: 1 }}>
+          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
+
+            <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+              <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
+              <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
+              <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
+            </div>
+
             {loading && <div className="text-sm text-gray-500">Loading...</div>}
             {error && <div className="text-sm text-red-500">{error}</div>}
-            {Object.keys(layoutFloors).length === 0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
             {Object.keys(layoutFloors).map(floorNum => (
-              <div key={floorNum} style={{ marginBottom: 12 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: 'var(--muted)' }}>Floor {floorNum}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+              <div key={floorNum} style={{ marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
+                  Floor {floorNum}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                   {layoutFloors[floorNum].map(r => (
                     <div
                       key={r.number}
-                      className={`room ${r.status}`}
-                      onClick={() => { /* optional click */ }}
-                      style={{
-                        height: 48,
-                        fontWeight: 700,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 8,
-                        background: r.status === 'occupied' ? 'rgba(246, 85, 85, 0.08)' : r.status === 'reserved' ? 'rgba(255, 213, 128, 0.6)' : 'rgba(139, 224, 164, 0.6)',
-                        border: '1px solid rgba(0,0,0,0.06)'
-                      }}
+                      style={roomBoxStyle(r)}
+                      title={
+                        r.status === 'reserved'
+                          ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+                          : r.status === 'occupied'
+                          ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                          : 'Free'
+                      }
+                      onClick={() => handleRoomClick(r)}
                     >
-                      {floorNum}{String(r.number).slice(-2)}
+                      {r.number}
                     </div>
                   ))}
                 </div>
@@ -642,9 +391,71 @@ export default function LiveUpdate() {
           </div>
         </div>
 
-        <div className="flex-1">
-          <div className="border rounded p-3 max-h-[75vh] overflow-auto">
-            {renderSubpage() || rightContent()}
+        {/* RIGHT: Current Guests card */}
+        <div style={{ flex: 1 }}>
+          <div className="card" style={{ padding: 14, marginTop: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontWeight: 800 }}>Current Guests</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>{(effective.checkouts || []).length} occupied</div>
+            </div>
+
+            {/* Search (full width) */}
+            <div style={{ marginBottom: 10 }}>
+              <input className="input" style={{ width: '100%', padding: '8px 10px' }} placeholder="Search guest or room..." value={guestSearch} onChange={(e) => setGuestSearch(e.target.value)} />
+            </div>
+
+            {((effective.checkouts || []).length === 0) && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
+                {((effective.checkouts || []).filter(g => {
+                  const q = guestSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const name = String(g.guest?.name || g.name || '').toLowerCase();
+                  const rooms = (g.rooms || g.room || []);
+                  const roomsStr = Array.isArray(rooms) ? rooms.map(String).join(', ') : String(rooms);
+                  return name.includes(q) || roomsStr.includes(q);
+                })).map((g, idx) => {
+                  const name = g.guest?.name || g.name || 'Guest';
+                  const initials = (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('') || name.slice(0,2)).toUpperCase();
+                  const roomsArr = Array.isArray(g.rooms) ? g.rooms : (g.rooms ? [g.rooms] : (g.room ? [g.room] : []));
+                  return (
+                    <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
+                        {initials}
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <div style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {name}
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                                Room {roomsArr.join(', ')}
+                              </div>
+                              {g.guest?.edited && (
+                                <div style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a', padding: '2px 6px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>edited</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
+                          <div>Phone no: {g.guest?.contact || g.contact || '-'}</div>
+                          <div>Price: ₹{g.guest?.rate || g.rate || 0}/day</div>
+                          <div>In: {g.guest?.checkInDate || new Date(g.guest?.checkIn || g.checkIn || '').toLocaleDateString()} {g.guest?.checkInTime || ''}</div>
+                          <div>Paid: ₹{g.totalPaid || g.total || g.paid || 0}</div>
+                        </div>
+                      </div>
+
+                      {/* no edit / open id buttons per request */}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       </div>
