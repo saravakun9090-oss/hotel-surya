@@ -3953,9 +3953,24 @@ export default function App() {
     // attempt to write to remote (non-blocking)
     (async () => {
       try {
-        const { saveAll } = await import('./services/dualSync');
-        saveAll(state).catch(e => console.warn('remote save failed', e));
-  } catch (_e) { console.warn('dualSync import failed', _e); }
+        // prefer a direct save to the backend state endpoint when available
+        const mongo = await import('./services/mongoSync');
+        const ok = await (mongo.testConnection ? mongo.testConnection() : Promise.resolve(false));
+        if (ok) {
+          try {
+            await mongo.saveStateToMongo(state);
+          } catch (err) {
+            console.warn('saveStateToMongo failed, falling back to queued save', err);
+            const { saveAll } = await import('./services/dualSync');
+            await saveAll(state).catch(e => console.warn('remote save (queued) failed', e));
+          }
+        } else {
+          const { saveAll } = await import('./services/dualSync');
+          await saveAll(state).catch(e => console.warn('remote save (queued) failed', e));
+        }
+      } catch (_e) {
+        console.warn('remote save logic failed', _e);
+      }
     })();
   }, [state]);
 

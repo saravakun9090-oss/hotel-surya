@@ -282,6 +282,19 @@ export default function LiveUpdate() {
               <div className={`text-xs px-2 py-1 rounded ${remoteState ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{remoteState ? 'Live' : 'Cached'}</div>
               <button className="text-xs px-2 py-1 border rounded" onClick={forceFetch}>Force fetch</button>
               <button className="text-xs px-2 py-1 border rounded" onClick={reloadFromCache}>Reload cache</button>
+              <button className="text-xs px-2 py-1 border rounded" onClick={async () => {
+                try {
+                  const payload = { state: localState };
+                  const res = await fetch(`${API_BASE}/state`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+                  if (!res.ok) {
+                    const txt = await res.text();
+                    return alert('Push failed: ' + txt);
+                  }
+                  alert('Pushed local state to remote');
+                } catch (err) {
+                  alert('Push failed: ' + String(err));
+                }
+              }}>Push local</button>
             </div>
           </div>
         </div>
