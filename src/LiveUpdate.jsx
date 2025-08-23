@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { getBaseFolder, ensurePath } from './utils/fsAccess';
+// no local FS access in LiveUpdate UI — rely only on remoteState
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -75,23 +75,17 @@ export default function LiveUpdate() {
   const [rentSearch, setRentSearch] = useState('');
   const [rentFrom, setRentFrom] = useState('');
   const [rentTo, setRentTo] = useState('');
-  const [localRentList, setLocalRentList] = useState([]);
-  const [localExpenses, setLocalExpenses] = useState([]);
-  const [localCheckouts, setLocalCheckouts] = useState([]);
-  const [storageConnected, setStorageConnected] = useState(false);
 
-  // effective dataset: prefer non-empty remote arrays, otherwise fall back to local lists
+  // effective dataset: use only remoteState (no local storage fallbacks)
   const effective = useMemo(() => {
     const e = {};
     e.floors = remoteState?.floors || {};
-    e.reservations = (remoteState?.reservations && remoteState.reservations.length) ? remoteState.reservations : [];
-    e.checkouts = (remoteState?.checkouts && remoteState.checkouts.length) ? remoteState.checkouts : localCheckouts;
-    if (remoteState?.rentPayments && remoteState.rentPayments.length) e.rentPayments = remoteState.rentPayments;
-    else if (remoteState?.rent_payments && remoteState.rent_payments.length) e.rentPayments = remoteState.rent_payments;
-    else e.rentPayments = localRentList;
-    e.expenses = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
+    e.reservations = remoteState?.reservations || [];
+    e.checkouts = remoteState?.checkouts || [];
+    e.rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
+    e.expenses = remoteState?.expenses || [];
     return e;
-  }, [remoteState, localRentList, localExpenses, localCheckouts]);
+  }, [remoteState]);
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -109,62 +103,7 @@ export default function LiveUpdate() {
     return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
   }, [allRooms, search]);
 
-  // Load recent local RentCollections, Expenses and Checkouts as fallbacks when remote doesn't provide data
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const base = await getBaseFolder();
-        setStorageConnected(!!base);
-        if (!base) return;
-
-        const rentAcc = [];
-        const expAcc = [];
-        const checkoutAcc = [];
-        // scan last 7 days
-        for (let d = 0; d < 7; d++) {
-          const dt = new Date();
-          dt.setDate(dt.getDate() - d);
-          const folder = dt.toISOString().slice(0,10);
-
-          try {
-            const rentDir = await ensurePath(base, ['RentCollections', folder]);
-            for await (const [name, handle] of rentDir.entries()) {
-              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
-              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `RentCollections/${folder}/${name}`; rentAcc.push(data); } catch(e) { continue; }
-            }
-          } catch (e) { /* ignore */ }
-
-          try {
-            const expDir = await ensurePath(base, ['Expenses', folder]);
-            for await (const [name, handle] of expDir.entries()) {
-              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
-              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Expenses/${folder}/${name}`; expAcc.push(data); } catch(e) { continue; }
-            }
-          } catch (e) { /* ignore */ }
-
-          try {
-            const coDir = await ensurePath(base, ['Checkouts', folder]);
-            for await (const [name, handle] of coDir.entries()) {
-              if (handle.kind !== 'file' || !name.endsWith('.json')) continue;
-              try { const f = await handle.getFile(); const data = JSON.parse(await f.text()); data._file = `Checkouts/${folder}/${name}`; checkoutAcc.push(data); } catch(e) { continue; }
-            }
-          } catch (e) { /* ignore */ }
-        }
-
-        if (!mounted) return;
-        rentAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
-        expAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
-        checkoutAcc.sort((a,b)=> (b._file||'').localeCompare(a._file||''));
-        setLocalRentList(rentAcc);
-        setLocalExpenses(expAcc);
-        setLocalCheckouts(checkoutAcc);
-      } catch (e) {
-        setStorageConnected(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
+  // No local storage scanning in LiveUpdate — rely on remoteState only
 
   // Build a per-floor layout and mark reservations for today
   const layoutFloors = useMemo(() => {
@@ -222,9 +161,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'rentpayment') {
-      // build effective pays (prefer non-empty remote arrays)
-      const paysRemote = (remoteState?.rentPayments && remoteState.rentPayments.length) ? remoteState.rentPayments : (remoteState?.rent_payments && remoteState.rent_payments.length ? remoteState.rent_payments : null);
-      const effectivePays = paysRemote ? paysRemote : (localRentList || []);
+      const effectivePays = effective.rentPayments || [];
       // apply dedicated rent filters (date range + search)
       const fromDate = rentFrom ? new Date(rentFrom) : null;
       const toDate = rentTo ? new Date(rentTo) : null;
@@ -246,7 +183,7 @@ export default function LiveUpdate() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="text-lg font-semibold">Rent Payments</div>
-            <div className="text-sm text-gray-500">{effectivePays.length} total {storageConnected ? '' : '(storage not connected)'}</div>
+            <div className="text-sm text-gray-500">{effectivePays.length} total</div>
           </div>
 
           <div className="flex gap-2 mb-3 flex-wrap">
@@ -273,7 +210,7 @@ export default function LiveUpdate() {
     }
 
     if (view === 'expenses') {
-      const ex = (remoteState?.expenses && remoteState.expenses.length) ? remoteState.expenses : localExpenses;
+      const ex = effective.expenses || [];
       const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
       return (
         <div>
