@@ -67,7 +67,7 @@ function saveState(state) {
     fetch(`${base}/state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state })
+      body: JSON.stringify(state)
     }).catch(() => {});
   } catch (_e) { /* ignore */ }
 }

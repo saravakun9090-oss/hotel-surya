@@ -123,7 +123,8 @@ app.get('/api/state', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
   const doc = await col.findOne({ _id: 'singleton' });
-  res.json({ state: doc?.state || null });
+  // return the raw stored object (same shape as localStorage)
+  return res.json(doc?.state || null);
 });
 
 // Server-Sent Events endpoint for live updates
@@ -181,13 +182,12 @@ app.get('/api/fullstate', async (req, res) => {
 app.post('/api/state', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
-  const { state } = req.body || {};
-  await col.updateOne({ _id: 'singleton' }, { $set: { state, updatedAt: new Date() } });
-  // broadcast to SSE clients the new state
-  try {
-    broadcastState(state);
-  } catch (_e) { /* ignore */ }
-  res.json({ ok: true });
+  // Accept either { state: {...} } or the raw object directly
+  const payload = (req.body && typeof req.body === 'object' && 'state' in req.body) ? req.body.state : req.body || null;
+  await col.updateOne({ _id: 'singleton' }, { $set: { state: payload, updatedAt: new Date() } });
+  // broadcast to SSE clients the new state (raw)
+  try { broadcastState(payload); } catch (_e) { /* ignore */ }
+  return res.json({ ok: true });
 });
 
 // Insert a rent entry into RentCollections and broadcast updated fullstate
