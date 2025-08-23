@@ -19,10 +19,7 @@ function generateDefault() {
       floors[f].push({ number, status: "free", guest: null, reservedFor: null });
     }
   }
-  floors[1][1].status = 'reserved'; floors[1][1].reservedFor = { name: 'A. Kumar', from: '2025-08-15' };
-  floors[2][2].status = 'occupied'; floors[2][2].guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123', rate: 1500 };
-  floors[3][0].status = 'occupied'; floors[3][0].guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998', rate: 2000 };
-  return { floors, guests: [], reservations: [ { date: new Date().toISOString().slice(0,10), room: 101, name: 'A. Kumar' } ], rentPayments: [], expenses: [] };
+  return { floors, guests: [], reservations: [], rentPayments: [], expenses: [] };
 }
 
 async function run() {
@@ -33,7 +30,7 @@ async function run() {
     const col = db.collection(colName);
     const sample = generateDefault();
     const res = await col.updateOne({ _id: 'singleton' }, { $set: { state: sample, updatedAt: new Date() } }, { upsert: true });
-    console.log('Wrote sample state. result:', res.result || res);
+  console.log('Wrote default state. result:', res.result || res);
   } catch (e) {
     console.error('Error seeding:', e.message);
     process.exitCode = 1;
