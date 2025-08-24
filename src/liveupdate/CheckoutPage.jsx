@@ -2,7 +2,12 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const COLORS = { deep: '#2c3f34', cream: '#f0eee1', muted: '#6b7a72', border: 'rgba(0,0,0,0.12)' };
+const COLORS = {
+deep: '#2c3f34',
+cream: '#f7f5ee', // was #f0eee1
+muted: '#92caacff', // was #6b7a72
+border: 'rgba(0,0,0,0.12)'
+};
 
 export default function CheckoutPage({ data }) {
   const navigate = useNavigate();
@@ -51,13 +56,7 @@ export default function CheckoutPage({ data }) {
   return (
     <div>
       <div style={{ marginBottom: 10 }}>
-        <button
-          className="btn ghost"
-          onClick={() => navigate('/liveupdate')}
-          style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}
-        >
-          ← Back
-        </button>
+        <button className="btn ghost" onClick={() => navigate('/liveupdate')} style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}>← Back</button>
       </div>
 
       {/* Filters/Header */}

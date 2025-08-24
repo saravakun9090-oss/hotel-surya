@@ -12,10 +12,10 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
 
 // Theme tokens
 const COLORS = {
-  deep: '#2c3f34',
-  cream: '#f0eee1',
-  muted: '#6b7a72',
-  border: 'rgba(0,0,0,0.12)'
+deep: '#2c3f34',
+cream: '#f7f5ee', // was #f0eee1
+muted: '#92caacff', // was #6b7a72
+border: 'rgba(0,0,0,0.12)'
 };
 
 function usePolling(url, interval = 2500) {
@@ -67,35 +67,36 @@ const Pill = ({ to, active, children }) => (
 
 // Legend helpers
 const legendDot = (bg) => ({
-  display: 'inline-block',
-  width: 10,
-  height: 10,
-  borderRadius: 3,
-  background: bg,
-  verticalAlign: 'middle',
-  marginRight: 6,
-  border: '1px solid rgba(0,0,0,0.08)'
+display: 'inline-block',
+width: 8, // was 10
+height: 8, // was 10
+borderRadius: 2, // was 3
+background: bg,
+verticalAlign: 'middle',
+marginRight: 5, // was 6
+border: '1px solid rgba(0,0,0,0.08)'
 });
 
 // Room box style (bug-fixed)
 const roomBoxStyle = (r) => {
-  const base = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
-    minWidth: 72,
-    borderRadius: 10,
-    fontWeight: 800,
-    cursor: 'pointer',
-    border: `1px solid ${COLORS.border}`,
-    userSelect: 'none',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-    color: COLORS.deep
-  };
-  if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.7)' };
-  if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.75)' };
-  return { ...base, background: COLORS.cream };
+const base = {
+display: 'flex',
+alignItems: 'center',
+justifyContent: 'center',
+minHeight: 44, // was 56
+minWidth: 56, // was 72
+borderRadius: 8, // was 10
+fontWeight: 700, // was 800
+fontSize: 13, // NEW: helps density
+cursor: 'pointer',
+border: '1px solid rgba(0,0,0,0.12)',
+userSelect: 'none',
+boxShadow: '0 1px 1px rgba(0,0,0,0.04)', // lighter
+color: '#2c3f34'
+};
+if (r.status === 'reserved') return { ...base, background: '#ffe3a6' };
+if (r.status === 'occupied') return { ...base, background: '#bfe8cb' };
+return { ...base, background: '#ffffff' };
 };
 
 // Normalize check-in date to yyyy-mm-dd
@@ -179,9 +180,9 @@ export default function LiveUpdate() {
       <div
         className="card"
         style={{
-          padding: 16,
-          marginTop: 16,
-          borderRadius: 12,
+          padding: 12, // was 16
+          marginBottom: 10, // was 12
+          borderRadius: 10, // was 12
           boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
           background: COLORS.cream,
           border: `1px solid ${COLORS.border}`
@@ -263,29 +264,13 @@ export default function LiveUpdate() {
 
   const sub = path.split('/').pop();
 
-  // Back button shell for subpages
-  const SubpageShell = ({ children }) => (
-    <div>
-      <div style={{ marginBottom: 10 }}>
-        <button
-          className="btn ghost"
-          onClick={() => navigate('/liveupdate')}
-          style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}
-        >
-          ← Back
-        </button>
-      </div>
-      {children}
-    </div>
-  );
-
   const renderSubpage = () => {
-    if (sub === 'reservations') return <SubpageShell><ReservationsPage data={remoteState} /></SubpageShell>;
-    if (sub === 'checkout') return <SubpageShell><CheckoutPage data={remoteState} /></SubpageShell>;
-    if (sub === 'rentpayment') return <SubpageShell><RentPaymentPage data={remoteState} /></SubpageShell>;
-    if (sub === 'expenses') return <SubpageShell><ExpensesPage data={remoteState} /></SubpageShell>;
-    return null;
-  };
+if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
+if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
+if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
+if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
+return null;
+};
 
   return (
     <div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
@@ -320,7 +305,7 @@ export default function LiveUpdate() {
             >
               <div style={{ fontWeight: 900, marginBottom: 10, color: COLORS.deep }}>Rooms Today</div>
 
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: COLORS.muted, marginBottom: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
                 <div><span style={legendDot(COLORS.cream)} /> Free</div>
                 <div><span style={legendDot('rgba(255, 213, 128, 0.7)')} /> Reserved</div>
                 <div><span style={legendDot('rgba(139, 224, 164, 0.75)')} /> Occupied</div>
@@ -330,11 +315,11 @@ export default function LiveUpdate() {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
 
-                const gridCols = 'repeat(auto-fill, minmax(72px, 1fr))';
+                const gridCols = 'repeat(auto-fill, minmax(56px, 1fr))';
 
                 return (
-                  <div key={floorNum} style={{ marginBottom: 14 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: COLORS.muted, marginBottom: 8 }}>
+                  <div key={floorNum} style={{ marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
                       Floor {floorNum}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 10 }}>

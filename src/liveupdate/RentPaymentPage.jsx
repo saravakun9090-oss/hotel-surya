@@ -1,7 +1,12 @@
 // src/liveupdate/RentPaymentPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-const COLORS = { deep: '#2c3f34', cream: '#f0eee1', muted: '#6b7a72', border: 'rgba(0,0,0,0.12)' };
+const COLORS = {
+deep: '#2c3f34',
+cream: '#f7f5ee', // was #f0eee1
+muted: '#92caacff', // was #6b7a72
+border: 'rgba(0,0,0,0.12)'
+};
 
 export default function RentPaymentPage({ data }) {
   const navigate = useNavigate();
