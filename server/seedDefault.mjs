@@ -10,6 +10,7 @@ if (!uri) {
   process.exit(2);
 }
 
+// server/seedDefault.mjs (only the generator changed; rest same)
 const generateDefault = () => {
   const floors = {};
   for (let f = 1; f <= 5; f++) {
@@ -22,11 +23,14 @@ const generateDefault = () => {
 
   // sample data
   floors[1][1].status = 'reserved';
-  floors[1][1].reservedFor = { name: 'A. Kumar', from: '2025-08-15' };
-  floors.status = 'occupied';
-  floors.guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123', rate: 1500 };
-  floors.status = 'occupied';
-  floors.guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998', rate: 2000 };
+  floors[1][1].reservedFor = { name: 'A. Kumar', from: new Date().toISOString().slice(0,10) };
+
+  // mark 202, 301 as occupied examples (indexing: 2nd floor index 1 -> room 202; 3rd floor index 0 -> room 301)
+  floors[2][1].status = 'occupied';
+  floors[2][1].guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123', rate: 1500 };
+
+  floors[3][0].status = 'occupied';
+  floors[3][0].guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998', rate: 2000 };
 
   const todayISO = new Date().toISOString().slice(0,10);
 
@@ -37,7 +41,6 @@ const generateDefault = () => {
       { name: 'zzzzz', place: '1111', room: 101, date: todayISO },
       { name: 'xxxxxx', place: 'yyyyyyy', room: 103, date: todayISO }
     ],
-    // NEW: make these arrays exist even if empty
     checkouts: [],
     rentPayments: [],
     expenses: []

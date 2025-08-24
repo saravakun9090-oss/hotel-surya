@@ -1,10 +1,10 @@
+// server/index.js
 import express from 'express';
 import cors from 'cors';
-import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { Readable } from 'stream';
-import { MongoClient, ObjectId } from 'mongodb';
+import { MongoClient, GridFSBucket, ObjectId } from 'mongodb';
 
 dotenv.config();
 
@@ -14,42 +14,62 @@ app.use(express.json());
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME || 'hotel_surya';
-const COLLECTION = process.env.COLLECTION || 'app_state';
+// Pick ONE and keep consistent across repo: 'state' or 'app_state'
+const COLLECTION = process.env.COLLECTION || 'state';
+const PORT = process.env.PORT || 4000;
 
+// Globals
 let dbClient;
+let db;
 let col;
 let bucket;
 let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
 
-
 async function initDb() {
+  if (!MONGO_URI) {
+    console.error('[DB] Missing MONGO_URI env');
+    return;
+  }
   if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
 
-  dbClient = new MongoClient(MONGO_URI);
+  console.log('[DB] Connecting to Mongo...');
+  dbClient = new MongoClient(MONGO_URI, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 8000,
+  });
+  await dbClient.connect();
+
   db = dbClient.db(DB_NAME);
 
-  col = db.collection('state');
+  // Use env-configured collection name consistently
+  col = db.collection(COLLECTION);
+
+  // Choose one bucket name and keep consistent; using 'uploads' here
   bucket = new GridFSBucket(db, { bucketName: 'uploads' });
 
   checkoutsCol    = db.collection('checkouts');
   rentPaymentsCol = db.collection('rent_payments');
   expensesCol     = db.collection('expenses');
 
-  // optional indexes
-  await Promise.all([
+  await Promise.allSettled([
     checkoutsCol.createIndex({ checkOutDateTime: -1 }),
     rentPaymentsCol.createIndex({ date: -1 }),
     expensesCol.createIndex({ date: -1 }),
   ]);
+
+  console.log('[DB] Connected. Collections and indexes ready.');
 }
 
 async function ensureDb() {
   if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
-  await initDb();
+  try {
+    await initDb();
+  } catch (e) {
+    console.error('[DB] ensureDb error:', e);
+  }
 }
-
 
 app.get('/api/ping', async (req, res) => {
   await ensureDb();
@@ -60,7 +80,12 @@ app.get('/api/ping', async (req, res) => {
 app.get('/api/debug', async (req, res) => {
   try {
     await ensureDb();
-    const info = { ok: !!col, db: DB_NAME, collection: COLLECTION };
+    const info = {
+      ok: !!col,
+      db: DB_NAME,
+      collection: COLLECTION,
+      hasMongoUri: !!MONGO_URI
+    };
     res.json(info);
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
@@ -70,20 +95,24 @@ app.get('/api/debug', async (req, res) => {
 // multer memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Upload scanned file to GridFS and return a public URL token
+// Upload scanned file to GridFS and return id
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
     await ensureDb();
     if (!bucket) return res.status(500).json({ ok: false, msg: 'gridfs not initialized' });
+    if (!req.file) return res.status(400).json({ ok: false, error: 'no file' });
+
     const fileBuffer = req.file.buffer;
-    const filename = req.file.originalname;
+    const filename = req.file.originalname || 'upload';
     const readable = Readable.from(fileBuffer);
     const uploadStream = bucket.openUploadStream(filename);
-    readable.pipe(uploadStream)
+
+    readable
+      .on('error', (err) => res.status(500).json({ ok: false, error: String(err) }))
+      .pipe(uploadStream)
       .on('error', (err) => res.status(500).json({ ok: false, error: String(err) }))
       .on('finish', (file) => {
-        // return id for download
-        res.json({ ok: true, id: file._id.toString(), filename });
+        res.json({ ok: true, id: file._id.toString(), filename: file.filename });
       });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
@@ -95,8 +124,8 @@ app.get('/api/download/:id', async (req, res) => {
   try {
     await ensureDb();
     if (!bucket) return res.status(500).send('GridFS not initialized');
-    const id = req.params.id;
-    const _id = new dbClient.bson.ObjectId(id);
+
+    const _id = new ObjectId(String(req.params.id));
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => res.status(404).send(String(err)));
     downloadStream.pipe(res);
@@ -109,7 +138,7 @@ app.get('/api/state', async (req, res) => {
   try {
     await ensureDb();
     if (!col || !checkoutsCol || !rentPaymentsCol || !expensesCol) {
-      return res.status(500).json({ ok: false, error: 'mongo not initialized' });
+      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     }
 
     const doc = await col.findOne({ _id: 'singleton' });
@@ -136,18 +165,21 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
-
-
-
 app.post('/api/state', async (req, res) => {
   await ensureDb();
-  if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+  if (!col) return res.status(503).json({ ok: false, msg: 'mongo not initialized' });
+
   const { state } = req.body || {};
-  await col.updateOne({ _id: 'singleton' }, { $set: { state, updatedAt: new Date() } });
+  await col.updateOne(
+    { _id: 'singleton' },
+    { $set: { state, updatedAt: new Date() } },
+    { upsert: true }
+  );
   res.json({ ok: true });
 });
 
-const PORT = process.env.PORT || 4000;
-initDb().catch(err => console.error('initDb failed', err)).finally(() => {
-  app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
-});
+(async () => {
+  console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
+  await ensureDb(); // don’t crash if DB missing; routes will 503 until configured
+  app.listen(PORT, () => console.log(`[Server] Listening on ${PORT}`));
+})();
