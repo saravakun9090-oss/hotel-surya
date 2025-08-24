@@ -273,15 +273,20 @@ app.post('/api/expense', async (req, res) => {
     if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
     const body = req.body || {};
-    const doc = {
-      description: String(body.description || '').trim(),
-      amount: Number(body.amount) || 0,
-      date: body.date || new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString()
-    };
+const doc = {
+  description: String(body.description || '').trim(),
+  amount: Number(body.amount) || 0,
+  date: body.date || new Date().toISOString().slice(0, 10),
+  createdAt: new Date().toISOString()
+};
 
-    const result = await expensesCol.insertOne(doc);
-    res.json({ ok: true, id: String(result.insertedId) });
+const result = await expensesCol.insertOne(doc);
+
+// Notify listeners that expenses changed
+sseBroadcast('expenses:update', { action: 'created', id: String(result.insertedId) });
+
+res.json({ ok: true, id: String(result.insertedId) });
+
   } catch (e) {
     console.error('POST /api/expense failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -289,18 +294,23 @@ app.post('/api/expense', async (req, res) => {
 });
 
 // Delete an expense
+// Delete an expense + SSE notify
 app.delete('/api/expense/:id', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+try {
+await ensureDb();
+if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
     const id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
 
-    const result = await expensesCol.deleteOne({ _id: new ObjectId(id) });
-    if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
+const result = await expensesCol.deleteOne({ _id: new ObjectId(id) });
+if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
 
-    res.json({ ok: true });
+// Notify listeners that expenses changed
+sseBroadcast('expenses:update', { action: 'deleted', id });
+
+res.json({ ok: true });
+
   } catch (e) {
     console.error('DELETE /api/expense/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
