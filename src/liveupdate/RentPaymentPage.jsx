@@ -1,5 +1,8 @@
 // src/liveupdate/RentPaymentPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+// inside component:
+const navigate = useNavigate();
 
 export default function RentPaymentPage({ data }) {
   const base = useMemo(() => (data?.rentPayments || data?.rent_payments || []), [data]);
@@ -68,6 +71,9 @@ export default function RentPaymentPage({ data }) {
 
   return (
     <div>
+      <div style={{ marginBottom: 10 }}>
+  <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+</div>
       {/* Header */}
       <div className="header-row" style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div>

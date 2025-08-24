@@ -1,5 +1,8 @@
 // src/liveupdate/ReservationsPage.jsx
 import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+// inside component:
+const navigate = useNavigate();
 
 export default function ReservationsPage({ data }) {
   const list = useMemo(() => (data?.reservations || []).slice().reverse(), [data]);
@@ -19,6 +22,9 @@ export default function ReservationsPage({ data }) {
 
   return (
     <div>
+      <div style={{ marginBottom: 10 }}>
+  <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+</div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
         <input
           placeholder="Search by name/place/room/date"

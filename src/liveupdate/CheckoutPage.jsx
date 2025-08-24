@@ -1,5 +1,8 @@
 // src/liveupdate/CheckoutPage.jsx
 import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+// inside component:
+const navigate = useNavigate();
 
 export default function CheckoutPage({ data }) {
   const all = useMemo(() => (data?.checkouts || data?.checkoutsList || []).slice().reverse(), [data]);
@@ -47,7 +50,11 @@ export default function CheckoutPage({ data }) {
   }, [all, searchQuery, filterDateFrom, filterDateTo, filterPayment]);
 
   return (
+    
     <div>
+      <div style={{ marginBottom: 10 }}>
+  <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+</div>
       {/* Filters/Header */}
       <div
         className="card"

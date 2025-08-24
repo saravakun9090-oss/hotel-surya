@@ -1,6 +1,6 @@
 // src/LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -14,7 +14,6 @@ function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   useEffect(() => {
     let mounted = true;
     let timer = null;
@@ -40,7 +39,6 @@ function usePolling(url, interval = 2500) {
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
-
   return { data, loading, error };
 }
 
@@ -54,7 +52,7 @@ const Pill = ({ to, active, children }) => (
   </Link>
 );
 
-// Styles for "Rooms Today" grid
+// Legend helpers
 const legendDot = (bg) => ({
   display: 'inline-block',
   width: 10,
@@ -66,36 +64,33 @@ const legendDot = (bg) => ({
   border: '1px solid rgba(0,0,0,0.08)'
 });
 
+// Room box style (bug-fixed: stronger contrast for "free", consistent border, grid-safe min width)
 const roomBoxStyle = (r) => {
   const base = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52, // taller for tap targets on mobile
+    minHeight: 52,
+    minWidth: 64,
     borderRadius: 10,
     fontWeight: 800,
     cursor: 'pointer',
-    border: '1px solid rgba(0,0,0,0.08)',
+    border: '1px solid rgba(0,0,0,0.12)',
     userSelect: 'none',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+    color: '#0b3d2e'
   };
-  if (r.status === 'reserved') {
-    return { ...base, background: 'rgba(255, 213, 128, 0.6)' };
-  }
-  if (r.status === 'occupied') {
-    return { ...base, background: 'rgba(139, 224, 164, 0.6)' };
-  }
-  return { ...base, background: 'rgba(255,255,255,0.8)' };
+  if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.65)' };
+  if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.7)' };
+  return { ...base, background: 'rgba(248, 250, 252, 0.9)' }; // light “free” tile
 };
 
+// Normalize check-in date to yyyy-mm-dd
 function normalizeCheckInYmd(guest) {
   if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
   if (guest?.checkInDate) {
     const d = guest.checkInDate;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
-      const [dd, mm, yyyy] = d.split('/');
-      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
-    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) { const [dd, mm, yyyy] = d.split('/'); return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`; }
     if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   }
   return '';
@@ -103,12 +98,13 @@ function normalizeCheckInYmd(guest) {
 
 export default function LiveUpdate() {
   const loc = useLocation();
+  const navigate = useNavigate();
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  const [searchRooms, setSearchRooms] = useState('');
+  // IMPORTANT: search moved into Current Guests (removed top-right search)
   const [guestSearch, setGuestSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -128,15 +124,7 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
-  const filteredRoomsForSearch = useMemo(() => {
-    const s = searchRooms.trim().toLowerCase();
-    if (!s) return allRooms;
-    return allRooms.filter(r =>
-      String(r.number).includes(s) ||
-      (r.guest?.name && r.guest.name.toLowerCase().includes(s))
-    );
-  }, [allRooms, searchRooms]);
-
+  // Group occupied by guest (multi-room booking grouped)
   const occupiedGroups = useMemo(() => {
     const map = new Map();
     for (const r of allRooms) {
@@ -151,7 +139,7 @@ export default function LiveUpdate() {
     }));
   }, [allRooms]);
 
-  // Exact stay-matched payments: name::checkInYmd (requires Accounts to POST checkInYmd)
+  // Exact stay-matched payments: name::checkInYmd
   const paymentsByStayKey = useMemo(() => {
     const sums = new Map();
     for (const p of rentPayments) {
@@ -164,6 +152,7 @@ export default function LiveUpdate() {
     return sums;
   }, [rentPayments]);
 
+  // Current Guests list (with search inside this card)
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -189,6 +178,7 @@ export default function LiveUpdate() {
           <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
         </div>
 
+        {/* Search moved here */}
         <div style={{ marginBottom: 10 }}>
           <input
             className="input"
@@ -258,11 +248,19 @@ export default function LiveUpdate() {
   }, [occupiedGroups, guestSearch, paymentsByStayKey]);
 
   const sub = path.split('/').pop();
+
+  // Subpage wrapper to add Back button on each subpage
+  const BackButton = () => (
+    <div style={{ marginBottom: 10 }}>
+      <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+    </div>
+  );
+
   const renderSubpage = () => {
-    if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
-    if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
-    if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
-    if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
+    if (sub === 'reservations') return (<><BackButton /><ReservationsPage data={remoteState} /></>);
+    if (sub === 'checkout') return (<><BackButton /><CheckoutPage data={remoteState} /></>);
+    if (sub === 'rentpayment') return (<><BackButton /><RentPaymentPage data={remoteState} /></>);
+    if (sub === 'expenses') return (<><BackButton /><ExpensesPage data={remoteState} /></>);
     return null;
   };
 
@@ -270,36 +268,21 @@ export default function LiveUpdate() {
 
   return (
     <div className="p-3 md:p-4 max-w-7xl mx-auto">
-      {/* Tabs with correct labels - horizontally scrollable on mobile */}
+      {/* Tabs with correct labels (kept across pages). Scrolling on mobile */}
       <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
         <div className="flex-1">
-          <div
-            className="flex gap-2 mb-2"
-            style={{ overflowX: 'auto', paddingBottom: 2 }}
-          >
+          <div className="flex gap-2 mb-2" style={{ overflowX: 'auto', paddingBottom: 2 }}>
             <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
             <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
             <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
             <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
           </div>
         </div>
-
-        {/* Root-only search controlling the Rooms grid */}
-        {isRootLiveUpdate && (
-          <div className="w-full md:w-72">
-            <input
-              value={searchRooms}
-              onChange={e => setSearchRooms(e.target.value)}
-              placeholder="Search rooms/guests"
-              className="w-full px-3 py-2 border rounded-md text-sm"
-              style={{ borderColor: 'rgba(0,0,0,0.12)' }}
-            />
-          </div>
-        )}
+        {/* Removed top-right search; it now lives in Current Guests card */}
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Rooms grid shown only on /liveupdate */}
+        {/* LEFT: Rooms grid only on /liveupdate (hidden entirely on subpages) */}
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
             <div
@@ -315,21 +298,16 @@ export default function LiveUpdate() {
               <div style={{ fontWeight: 900, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
 
               <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8, flexWrap: 'wrap' }}>
-                <div><span style={legendDot('rgba(255,255,255,0.9)')} /> Free</div>
+                <div><span style={legendDot('rgba(248, 250, 252, 0.9)')} /> Free</div>
                 <div><span style={legendDot('rgba(255, 213, 128, 0.7)')} /> Reserved</div>
                 <div><span style={legendDot('rgba(139, 224, 164, 0.7)')} /> Occupied</div>
               </div>
 
               {Object.keys(roomsByFloor).map(floorNum => {
-                const list = searchRooms
-                  ? roomsByFloor[floorNum].filter(r =>
-                      filteredRoomsForSearch.some(fr => fr.number === r.number)
-                    )
-                  : roomsByFloor[floorNum];
-
+                const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
 
-                // Mobile: 3 columns, Desktop: 4 columns
+                // Fluid grid: auto fill with min 70px tiles
                 const gridCols = 'repeat(auto-fill, minmax(70px, 1fr))';
 
                 return (
@@ -362,7 +340,7 @@ export default function LiveUpdate() {
           </div>
         )}
 
-        {/* RIGHT: subpages or default current guests on root */}
+        {/* RIGHT: subpages or default current guests (on root) */}
         <div className="flex-1">
           <div
             className="border rounded p-3 md:p-4"
