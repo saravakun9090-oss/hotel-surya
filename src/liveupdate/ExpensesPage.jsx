@@ -6,9 +6,9 @@ const COLORS = { deep: '#2c3f34', cream: '#f7f5ee', muted: '#2c3d34ff', border: 
 export default function ExpensesPage({ data }) {
   // SORT: most recent first
   const base = useMemo(() => {
-    const arr = (data?.expenses || []).slice();
-    arr.sort((a,b)=> new Date(b.date || 0) - new Date(a.date || 0));
-    return arr;
+  const arr = (data?.expenses || []).slice();
+  arr.sort((a,b)=> new Date(b.date || 0) - new Date(a.date || 0));
+  return arr;
   }, [data]);
 
   const [loading, setLoading] = useState(false);
@@ -66,6 +66,9 @@ export default function ExpensesPage({ data }) {
 
   return (
     <div>
+      <div style={{ marginBottom: 10 }}>
+        <button className="btn ghost" onClick={() => navigate('/liveupdate')} style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}>← Back</button>
+      </div>
       {/* Header */}
       <div className="header-row" style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div>
