@@ -1992,26 +1992,61 @@ function CheckOut({ state, setState }) {
       showSuccess("✅ Check-Out completed successfully");
       loadCheckoutList(); // refresh right panel
 
-      // NEW: Mirror checkout to backend for LiveUpdate (safe no-op if backend not configured)
-      try {
-        const API_BASE =
-          window.__MONGO_API_BASE__ ||
-          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-          '/api';
+      // Build a complete checkout doc and POST to server so LiveUpdate can show full details
+try {
+  const API_BASE =
+    window.__MONGO_API_BASE__ ||
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+    '/api';
 
-        // Minimal payload; you can enrich with more fields if needed
-        await fetch(`${API_BASE}/checkout`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: guestName || 'Guest',
-            rooms: roomsToCheckout,
-            checkOutDateTime: new Date().toISOString()
-          })
-        });
-      } catch (mirrorErr) {
-        console.warn('Remote checkout mirror failed:', mirrorErr);
+  // Try to derive contact/check-in fields from the first matched room guest
+  let contact = '';
+  let checkInDate = '';
+  let checkInTime = '';
+  for (const fnum of Object.keys(newState.floors)) {
+    for (const r of newState.floors[fnum]) {
+      if (roomsToCheckout.includes(r.number) && r.guest) {
+        contact = r.guest.contact || '';
+        // normalize check-in date/time (prefer explicit fields if present)
+        if (r.guest.checkInDate) {
+          checkInDate = r.guest.checkInDate;
+        } else if (r.guest.checkIn) {
+          const d = new Date(r.guest.checkIn);
+          checkInDate = d.toLocaleDateString();
+          checkInTime = d.toLocaleTimeString();
+        }
+        if (r.guest.checkInTime && !checkInTime) checkInTime = r.guest.checkInTime;
+        break;
       }
+    }
+  }
+
+  const now = new Date();
+  const checkOutDate = now.toLocaleDateString();
+  const checkOutTime = now.toLocaleTimeString();
+
+  await fetch(`${API_BASE}/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: guestName || 'Guest',
+      room: roomsToCheckout, // array is fine; UI will render as "101, 102"
+      contact,               // Phone no
+      checkInDate,           // e.g., "23/08/2025" or "8/23/2025"
+      checkInTime,           // optional
+      checkOutDate,
+      checkOutTime,
+      daysStayed: typeof days !== 'undefined' ? days : undefined,
+      totalRent: typeof totalRent !== 'undefined' ? totalRent : undefined,
+      totalPaid: typeof totalPayment !== 'undefined' ? totalPayment : undefined,
+      paymentTallyStatus: tallyStatus ? 'tallied' : 'not-tallied',
+      checkOutDateTime: now.toISOString() // useful for sorting
+    })
+  });
+} catch (mirrorErr) {
+  console.warn('Remote checkout mirror failed:', mirrorErr);
+}
+
     } catch (err) {
       console.error(err);
       showError(err?.message || "❌ Failed to complete check-out");
