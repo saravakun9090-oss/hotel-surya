@@ -1,3 +1,4 @@
+// src/LiveUpdate.jsx
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import ReservationsPage from './liveupdate/ReservationsPage';
@@ -9,7 +10,7 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
   ? import.meta.env.VITE_MONGO_API_BASE
   : (window.__MONGO_API_BASE__ || '/api');
 
-function usePolling(url, interval = 2000) {
+function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,12 +24,10 @@ function usePolling(url, interval = 2000) {
         if (!url) throw new Error('No API URL configured');
         const res = await fetch(url);
         const ct = (res.headers.get('content-type') || '').toLowerCase();
-        // If server returned non-OK, prefer the text body for debugging
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text}`);
         }
-        // If server returns HTML it's likely Netlify serving index.html (no backend configured)
         if (ct.includes('text/html')) {
           const text = await res.text();
           throw new Error('Expected JSON from API but received HTML (likely no backend configured).');
@@ -44,11 +43,9 @@ function usePolling(url, interval = 2000) {
         setError(null);
       } catch (e) {
         if (!mounted) return;
-        // Friendly error messages help Netlify users diagnose missing backend env
         const msg = String(e);
-        console.error('LiveUpdate fetch error:', msg, url);
         if (msg.includes('Expected JSON from API')) {
-          setError(`Could not reach backend API at ${url}. This usually means the site doesn't have a backend configured - set VITE_MONGO_API_BASE in Netlify (Site settings → Build & deploy → Environment) to your backend URL (include /api).`);
+          setError(`Could not reach backend API at ${url}. Set VITE_MONGO_API_BASE to your backend URL (include /api).`);
         } else if (msg.includes('No API URL configured')) {
           setError('No backend API configured. Set VITE_MONGO_API_BASE in your build environment.');
         } else {
@@ -60,29 +57,45 @@ function usePolling(url, interval = 2000) {
 
     fetchOnce();
     timer = setInterval(fetchOnce, interval);
-
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
 
   return { data, loading, error };
 }
 
-const PillButton = ({ to, active, children }) => (
-  <Link to={to} className={`px-3 py-1 rounded-md text-sm ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
+const Pill = ({ to, active, children }) => (
+  <Link
+    to={to}
+    className={`px-3 py-1 rounded-md text-sm ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}
+  >
     {children}
   </Link>
 );
 
+const statusBg = (status) => {
+  if (status === 'occupied') return 'bg-red-50 border-red-200';
+  if (status === 'reserved') return 'bg-yellow-50 border-yellow-200';
+  return 'bg-green-50 border-green-200';
+};
+
 const RoomBox = ({ room, onClick }) => (
-  <div onClick={() => onClick(room)} className={`border rounded-md p-3 mb-2 cursor-pointer flex items-center justify-between ${room.status === 'occupied' ? 'bg-red-50' : room.status === 'reserved' ? 'bg-yellow-50' : 'bg-green-50'}`}>
+  <div
+    onClick={() => onClick?.(room)}
+    className={`border rounded-md p-3 cursor-pointer flex items-center justify-between ${statusBg(room.status)}`}
+  >
     <div>
       <div className="font-semibold">{room.number}</div>
       <div className="text-xs text-gray-600">{room.status}</div>
-      {room.reservedFor && <div className="text-xs text-gray-500">Reserved: {room.reservedFor.name}</div>}
+      {room.reservedFor && (
+        <div className="text-xs text-gray-500">Reserved: {room.reservedFor.name}</div>
+      )}
     </div>
     <div className="text-right text-sm">
-      {room.guest ? <div className="font-medium">{room.guest.name}</div> : <div className="text-gray-500">—</div>}
-      <div className="mt-1"><button className="text-xs underline" onClick={(e)=>{e.stopPropagation(); onClick(room);}}>Open ID</button></div>
+      {room.guest ? (
+        <div className="font-medium truncate max-w-[120px]">{room.guest.name}</div>
+      ) : (
+        <div className="text-gray-500">—</div>
+      )}
     </div>
   </div>
 );
@@ -91,9 +104,16 @@ export default function LiveUpdate() {
   const navigate = useNavigate();
   const loc = useLocation();
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
-  const viewFromPath = loc.pathname.split('/').pop() || 'checkout';
-  const [view, setView] = useState(viewFromPath); // checkout | reservations | rentpayment | expenses
+
+  const subpath = loc.pathname.split('/').pop();
+  const [view, setView] = useState(subpath || 'checkout'); // checkout | reservations | rentpayment | expenses
   const [search, setSearch] = useState('');
+  const [guestSearch, setGuestSearch] = useState('');
+
+  useEffect(() => {
+    const v = loc.pathname.split('/').pop() || 'checkout';
+    setView(v);
+  }, [loc.pathname]);
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
 
@@ -102,78 +122,107 @@ export default function LiveUpdate() {
     for (const fl of Object.values(floors)) {
       for (const r of fl) arr.push(r);
     }
-    return arr.sort((a,b)=>a.number-b.number);
+    return arr.sort((a, b) => a.number - b.number);
   }, [floors]);
 
   const filteredRooms = useMemo(() => {
     const s = search.trim().toLowerCase();
     if (!s) return allRooms;
-    return allRooms.filter(r => String(r.number).includes(s) || (r.guest && r.guest.name && r.guest.name.toLowerCase().includes(s)));
+    return allRooms.filter(
+      r =>
+        String(r.number).includes(s) ||
+        (r.guest?.name && r.guest.name.toLowerCase().includes(s))
+    );
   }, [allRooms, search]);
 
-  const rightContent = () => {
-    if (!remoteState) return <div className="p-4 text-sm text-gray-500">No data</div>;
-  if (view === 'reservations') {
-      const res = remoteState.reservations || [];
-      const list = res.filter(r => (r.name || '').toLowerCase().includes(search.toLowerCase()));
-      return (
-        <div>
-          <div className="text-sm text-gray-600 mb-2">Reservations</div>
-          {list.map((r, i) => (
-            <div key={i} className="p-2 border-b">{r.date} — {r.room} — {r.name}</div>
-          ))}
-          {list.length===0 && <div className="p-2 text-sm text-gray-500">No reservations</div>}
-        </div>
-      );
+  // Group occupied rooms by guest (multi-room booking grouped)
+  const occupiedGroups = useMemo(() => {
+    const map = new Map();
+    for (const r of allRooms) {
+      if (r.status !== 'occupied' || !r.guest) continue;
+      const key = `${r.guest.name}::${r.guest.checkIn || ''}`;
+      if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [] });
+      map.get(key).rooms.push(r.number);
     }
+    return Array.from(map.values()).map(x => ({
+      guest: x.guest,
+      rooms: x.rooms.sort((a, b) => a - b)
+    }));
+  }, [allRooms]);
 
-    if (view === 'rentpayment') {
-      const pays = remoteState.rentPayments || remoteState.rent_payments || [];
-      const list = pays.filter(p => JSON.stringify(p).toLowerCase().includes(search.toLowerCase()));
-      return (
-        <div>
-          <div className="text-sm text-gray-600 mb-2">Rent Payments</div>
-          {list.map((p, i) => (
-            <div key={i} className="p-2 border-b">{p.date || p.month} — {p.room} — {p.amount}</div>
-          ))}
-          {list.length===0 && <div className="p-2 text-sm text-gray-500">No payments</div>}
-        </div>
-      );
-    }
+  const rightDefaultCurrentGuests = () => {
+    const list = occupiedGroups.filter(g => {
+      const q = guestSearch.trim().toLowerCase();
+      if (!q) return true;
+      const name = String(g.guest?.name || '').toLowerCase();
+      const rooms = (g.rooms || []).map(String).join(', ');
+      return name.includes(q) || rooms.includes(q);
+    });
 
-    if (view === 'expenses') {
-      const ex = remoteState.expenses || [];
-      const list = ex.filter(e => JSON.stringify(e).toLowerCase().includes(search.toLowerCase()));
-      return (
-        <div>
-          <div className="text-sm text-gray-600 mb-2">Expenses</div>
-          {list.map((e, i) => (
-            <div key={i} className="p-2 border-b">{e.date} — {e.category || e.note} — {e.amount}</div>
-          ))}
-          {list.length===0 && <div className="p-2 text-sm text-gray-500">No expenses</div>}
-        </div>
-      );
-    }
-
-    // default: checkout view
-    const occupied = allRooms.filter(r => r.status === 'occupied');
-    const list = occupied.filter(o => (o.guest?.name || '').toLowerCase().includes(search.toLowerCase()));
     return (
-      <div>
-        <div className="text-sm text-gray-600 mb-2">Checkouts / Active Stays</div>
-        {list.map((r) => (
-          <div key={r.number} className="p-2 border-b">
-            <div className="font-medium">Room {r.number} — {r.guest?.name}</div>
-            <div className="text-xs text-gray-600">Contact: {r.guest?.contact || '—'} • Rate: {r.guest?.rate || '—'}</div>
+      <div className="card" style={{ padding: 14, marginTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 800 }}>Current Guests</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <input
+            className="input"
+            style={{ width: '100%', padding: '8px 10px' }}
+            placeholder="Search guest or room..."
+            value={guestSearch}
+            onChange={(e) => setGuestSearch(e.target.value)}
+          />
+        </div>
+
+        {occupiedGroups.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 6 }}>
+            {list.map((g, idx) => {
+              const name = g.guest?.name || 'Guest';
+              const initials =
+                (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
+              return (
+                <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
+                  <div
+                    style={{
+                      width: 40, height: 40, borderRadius: 8, background: 'rgba(0,0,0,0.06)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14
+                    }}
+                  >
+                    {initials}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {name}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                          Room {(g.rooms || []).join(', ')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
+                      <div>Phone no: {g.guest?.contact || '—'}</div>
+                      <div>Price: ₹{g.guest?.rate || 0}/day</div>
+                      <div>In: {g.guest?.checkInDate || (g.guest?.checkIn ? new Date(g.guest.checkIn).toLocaleDateString() : '—')} {g.guest?.checkInTime || ''}</div>
+                      {/* No “Open ID” / edit as requested */}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))}
-        {list.length===0 && <div className="p-2 text-sm text-gray-500">No active checkouts</div>}
+        </div>
       </div>
     );
   };
 
-  // if the path specifically points to a subpage, render that full page on the right
-  const subpath = loc.pathname.split('/').pop();
   const renderSubpage = () => {
     if (subpath === 'reservations') return <ReservationsPage data={remoteState} />;
     if (subpath === 'checkout') return <CheckoutPage data={remoteState} />;
@@ -183,22 +232,28 @@ export default function LiveUpdate() {
   };
 
   return (
-    <div className="p-4 max-w-5xl mx-auto">
+    <div className="p-4 max-w-6xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
         <div className="flex-1">
           <div className="flex flex-wrap gap-2 mb-2">
-            <PillButton to="/liveupdate/checkout" active={view==='checkout'}>Checkout</PillButton>
-            <PillButton to="/liveupdate/reservations" active={view==='reservations'}>Reservations</PillButton>
-            <PillButton to="/liveupdate/rentpayment" active={view==='rentpayment'}>RentPayment</PillButton>
-            <PillButton to="/liveupdate/expenses" active={view==='expenses'}>Expenses</PillButton>
+            <Pill to="/liveupdate/checkout" active={view === 'checkout'}>Checkout</Pill>
+            <Pill to="/liveupdate/reservations" active={view === 'reservations'}>Reservations</Pill>
+            <Pill to="/liveupdate/rentpayment" active={view === 'rentpayment'}>RentPayment</Pill>
+            <Pill to="/liveupdate/expenses" active={view === 'expenses'}>Expenses</Pill>
           </div>
         </div>
-        <div className="w-full md:w-48">
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search" className="w-full px-2 py-1 border rounded text-sm" />
+        <div className="w-full md:w-56">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search rooms/guests"
+            className="w-full px-2 py-1 border rounded text-sm"
+          />
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
+        {/* Left: Rooms grid */}
         <div className="w-full md:w-80">
           <div className="mb-2 text-sm text-gray-600">Rooms</div>
           <div className="max-h-[70vh] overflow-auto">
@@ -207,13 +262,14 @@ export default function LiveUpdate() {
             <div className="grid grid-cols-2 md:grid-cols-1 gap-2">
               {filteredRooms.map(r => <RoomBox key={r.number} room={r} onClick={() => {}} />)}
             </div>
-            {filteredRooms.length===0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
+            {filteredRooms.length === 0 && !loading && <div className="text-sm text-gray-500">No rooms</div>}
           </div>
         </div>
 
+        {/* Right: active tab */}
         <div className="flex-1">
           <div className="border rounded p-3 max-h-[75vh] overflow-auto">
-            {renderSubpage() || rightContent()}
+            {renderSubpage() || rightDefaultCurrentGuests()}
           </div>
         </div>
       </div>

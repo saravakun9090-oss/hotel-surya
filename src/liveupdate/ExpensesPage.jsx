@@ -1,20 +1,49 @@
-import React from 'react';
-export default function ExpensesPage({ data }) {
-  const list = (data?.expenses || []).slice().reverse();
+// src/liveupdate/ReservationsPage.jsx
+import React, { useMemo, useState } from 'react';
+
+export default function ReservationsPage({ data }) {
+  const list = useMemo(() => (data?.reservations || []).slice().reverse(), [data]);
+  const [q, setQ] = useState('');
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return list;
+    return list.filter(r => {
+      const name = String(r.name || '').toLowerCase();
+      const place = String(r.place || '').toLowerCase();
+      const room = String(r.room || '');
+      const date = String(r.date || '');
+      return name.includes(s) || place.includes(s) || room.includes(s) || date.includes(s);
+    });
+  }, [q, list]);
+
   return (
     <div>
-      <h2 className="text-lg font-medium mb-2">Expenses</h2>
-      <div className="mb-3">
-        <input placeholder="Search expenses" className="w-full px-2 py-1 border rounded text-sm" />
+      <h2 className="text-lg font-semibold mb-2">Reservations</h2>
+      <div className="mb-2">
+        <input
+          placeholder="Search by name/place/room/date"
+          className="w-full px-2 py-1 border rounded text-sm"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
       </div>
-      <div className="space-y-2">
-        {list.map((e, i) => (
-          <div key={i} className="p-2 border rounded">
-            <div className="font-medium">{e.category || e.note} — {e.amount}</div>
-            <div className="text-xs text-gray-600">{e.date}</div>
+
+      <div className="list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filtered.length === 0 && <div style={{ color: 'var(--muted)' }}>No reservations</div>}
+        {filtered.map((r, i) => (
+          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', padding: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                {r.name} {r.place ? <span style={{ color: 'var(--muted)', fontWeight: 700 }}> - {r.place}</span> : null}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                Room {r.room} — {r.date}
+              </div>
+            </div>
+            {/* Buttons removed per request */}
           </div>
         ))}
-        {list.length===0 && <div className="text-sm text-gray-500">No expenses</div>}
       </div>
     </div>
   );
