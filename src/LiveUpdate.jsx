@@ -148,18 +148,22 @@ export default function LiveUpdate() {
 
   // Group occupied by guest
   const occupiedGroups = useMemo(() => {
-    const map = new Map();
-    for (const r of allRooms) {
-      if (r.status !== 'occupied' || !r.guest) continue;
-      const key = `${r.guest.name || ''}::${r.guest.checkIn || ''}`;
-      if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [] });
-      map.get(key).rooms.push(r.number);
-    }
-    return Array.from(map.values()).map(x => ({
-      guest: x.guest,
-      rooms: x.rooms.sort((a, b) => a - b)
-    }));
-  }, [allRooms]);
+const map = new Map();
+for (const r of allRooms) {
+if (r.status !== 'occupied' || !r.guest) continue;
+const key = `${r.guest.name || ''}::${r.guest.checkIn || ''}`;
+if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [], checkIn: r.guest.checkIn || r.guest.checkInDate || '' });
+map.get(key).rooms.push(r.number);
+}
+const list = Array.from(map.values()).map(x => ({
+guest: x.guest,
+rooms: x.rooms.sort((a,b)=>a-b),
+_checkInTs: x.checkIn ? new Date(x.checkIn).getTime() || 0 : 0
+}));
+// recent (latest check-in) first
+list.sort((a,b)=>b._checkInTs - a._checkInTs);
+return list;
+}, [allRooms]);
 
   // Exact stay-matched payments: name::checkInYmd
   const paymentsByStayKey = useMemo(() => {

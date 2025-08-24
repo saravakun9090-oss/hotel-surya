@@ -11,7 +11,16 @@ border: 'rgba(0,0,0,0.12)'
 
 export default function CheckoutPage({ data }) {
   const navigate = useNavigate();
-  const all = useMemo(() => (data?.checkouts || data?.checkoutsList || []).slice().reverse(), [data]);
+  const all = useMemo(() => {
+const arr = (data?.checkouts || data?.checkoutsList || []).slice();
+// sort by checkOutDateTime desc, fallback to checkOutDate, then original order
+arr.sort((a,b)=>{
+const ta = new Date(a.checkOutDateTime || a.checkOutDate || 0).getTime();
+const tb = new Date(b.checkOutDateTime || b.checkOutDate || 0).getTime();
+return tb - ta;
+});
+return arr;
+}, [data]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');

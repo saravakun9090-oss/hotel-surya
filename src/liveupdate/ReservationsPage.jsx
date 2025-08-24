@@ -10,7 +10,15 @@ border: 'rgba(0,0,0,0.12)'
 
 export default function ReservationsPage({ data }) {
   const navigate = useNavigate();
-  const list = useMemo(() => (data?.reservations || []).slice().reverse(), [data]);
+  const list = useMemo(() => {
+const arr = (data?.reservations || []).slice();
+arr.sort((a,b)=> {
+const ta = new Date(a.date || 0).getTime();
+const tb = new Date(b.date || 0).getTime();
+return tb - ta;
+});
+return arr;
+}, [data]);
   const [q, setQ] = useState('');
 
   const filtered = useMemo(() => {
