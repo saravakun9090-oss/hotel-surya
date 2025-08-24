@@ -4,6 +4,7 @@ import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { Readable } from 'stream';
+import { MongoClient, ObjectId } from 'mongodb';
 
 dotenv.config();
 
@@ -18,6 +19,9 @@ const COLLECTION = process.env.COLLECTION || 'app_state';
 let dbClient;
 let col;
 let bucket;
+let checkoutsCol;
+let rentPaymentsCol;
+let expensesCol;
 
 async function initDb() {
   if (!MONGO_URI) {
@@ -34,10 +38,6 @@ async function initDb() {
   const db = dbClient.db(DB_NAME);
   col = db.collection(COLLECTION);
 
-  // extra collections
-let checkoutsCol;
-let rentPaymentsCol;
-let expensesCol;
 
 checkoutsCol    = db.collection('checkouts');
 rentPaymentsCol = db.collection('rent_payments');
@@ -56,10 +56,8 @@ await expensesCol.createIndex({ date: -1 });
 
 // Ensure DB is ready for use; attempt to init if not yet connected.
 async function ensureDb() {
-  if (col && bucket) return;
-  try {
-    await initDb();
-  } catch (err) {
+  if (col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
+  try { await initDb(); } catch (err) {
     console.error('ensureDb failed', err.message || err);
   }
 }
@@ -109,7 +107,7 @@ app.get('/api/download/:id', async (req, res) => {
     await ensureDb();
     if (!bucket) return res.status(500).send('GridFS not initialized');
     const id = req.params.id;
-    const _id = new dbClient.bson.ObjectId(id);
+    const _id = new ObjectId(req.params.id);
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => res.status(404).send(String(err)));
     downloadStream.pipe(res);
@@ -125,28 +123,15 @@ app.get('/api/state', async (req, res) => {
       return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
     }
 
-    // 1) core singleton state (floors, guests, reservations, etc.)
     const doc = await col.findOne({ _id: 'singleton' });
     const baseState = doc?.state || null;
 
-    // 2) load extra arrays
     const [checkouts, rentPayments, expenses] = await Promise.all([
-      checkoutsCol
-        .find({}, { projection: { _id: 0 } })
-        .sort({ checkOutDateTime: -1 })
-        .toArray(),
-      rentPaymentsCol
-        .find({}, { projection: { _id: 0 } })
-        .sort({ date: -1 })
-        .toArray(),
-      expensesCol
-        .find({}, { projection: { _id: 0 } })
-        .sort({ date: -1 })
-        .toArray()
+      checkoutsCol.find({}, { projection: { _id: 0 } }).sort({ checkOutDateTime: -1 }).toArray(),
+      rentPaymentsCol.find({}, { projection: { _id: 0 } }).sort({ date: -1 }).toArray(),
+      expensesCol.find({}, { projection: { _id: 0 } }).sort({ date: -1 }).toArray()
     ]);
 
-    // 3) merge into response; do not mutate stored singleton
-    // Frontend expects: state.checkouts, state.rentPayments, state.expenses
     const merged = baseState ? { ...baseState } : {};
     merged.checkouts = checkouts;
     merged.rentPayments = rentPayments;
@@ -158,6 +143,7 @@ app.get('/api/state', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 
 app.post('/api/state', async (req, res) => {
