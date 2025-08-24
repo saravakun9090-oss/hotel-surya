@@ -23,44 +23,33 @@ let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
 
+
 async function initDb() {
-  if (!MONGO_URI) {
-    console.warn('MONGO_URI not set - mongo endpoints will fail');
-    return;
-  }
-  // initialize client and collections
-  if (dbClient && dbClient.topology && dbClient.topology.isConnected && dbClient.isConnected &&
-  col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) {
-    return; // already initialized (best-effort check)
-  }
-  dbClient = new MongoClient(MONGO_URI);
-  await dbClient.connect();
-  const db = dbClient.db(DB_NAME);
-  col = db.collection(COLLECTION);
+  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
 
+  dbClient = await MongoClient.connect(MONGO_URI);
+  db = dbClient.db(DB_NAME);
 
-checkoutsCol    = db.collection('checkouts');
-rentPaymentsCol = db.collection('rent_payments');
-expensesCol     = db.collection('expenses');
+  col = db.collection('state');
+  bucket = new GridFSBucket(db, { bucketName: 'uploads' });
 
-// Indexes (recommended)
-await checkoutsCol.createIndex({ checkOutDateTime: -1 });
-await rentPaymentsCol.createIndex({ date: -1 });
-await expensesCol.createIndex({ date: -1 });
-  // GridFS bucket
-  const { GridFSBucket } = await import('mongodb');
-  bucket = new GridFSBucket(db, { bucketName: 'scans' });
-  // ensure single doc with _id = 'singleton'
-  await col.updateOne({ _id: 'singleton' }, { $setOnInsert: { state: null } }, { upsert: true });
+  checkoutsCol    = db.collection('checkouts');
+  rentPaymentsCol = db.collection('rent_payments');
+  expensesCol     = db.collection('expenses');
+
+  // optional indexes
+  await Promise.all([
+    checkoutsCol.createIndex({ checkOutDateTime: -1 }),
+    rentPaymentsCol.createIndex({ date: -1 }),
+    expensesCol.createIndex({ date: -1 }),
+  ]);
 }
 
-// Ensure DB is ready for use; attempt to init if not yet connected.
 async function ensureDb() {
-  if (col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
-  try { await initDb(); } catch (err) {
-    console.error('ensureDb failed', err.message || err);
-  }
+  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
+  await initDb();
 }
+
 
 app.get('/api/ping', async (req, res) => {
   await ensureDb();
@@ -120,29 +109,33 @@ app.get('/api/state', async (req, res) => {
   try {
     await ensureDb();
     if (!col || !checkoutsCol || !rentPaymentsCol || !expensesCol) {
-      return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
+      return res.status(500).json({ ok: false, error: 'mongo not initialized' });
     }
 
     const doc = await col.findOne({ _id: 'singleton' });
-    const baseState = doc?.state || null;
+    const baseState = doc?.state || {};
 
     const [checkouts, rentPayments, expenses] = await Promise.all([
       checkoutsCol.find({}, { projection: { _id: 0 } }).sort({ checkOutDateTime: -1 }).toArray(),
       rentPaymentsCol.find({}, { projection: { _id: 0 } }).sort({ date: -1 }).toArray(),
-      expensesCol.find({}, { projection: { _id: 0 } }).sort({ date: -1 }).toArray()
+      expensesCol.find({}, { projection: { _id: 0 } }).sort({ date: -1 }).toArray(),
     ]);
 
-    const merged = baseState ? { ...baseState } : {};
-    merged.checkouts = checkouts;
-    merged.rentPayments = rentPayments;
-    merged.expenses = expenses;
-
-    res.json({ state: merged });
+    res.json({
+      ok: true,
+      state: {
+        ...baseState,
+        checkouts,
+        rentPayments,
+        expenses
+      }
+    });
   } catch (e) {
     console.error('GET /api/state failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 
 
