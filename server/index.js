@@ -180,58 +180,79 @@ app.post('/api/state', async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/rent-payment', async (req, res) => {
+// Update rent payment
+app.put('/api/rent-payment/:id', async (req, res) => {
   try {
     await ensureDb();
-    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-
+    const { id } = req.params;
     const body = req.body || {};
-    const doc = {
-      name: String(body.name || '').trim(),
-      room: Array.isArray(body.room)
-        ? body.room.map(Number)
-        : String(body.room || '')
-            .split(',')
-            .map(s => Number(s.trim()))
-            .filter(Boolean),
-      days: Number(body.days) || null,
-      amount: Number(body.amount) || 0,
-      mode: String(body.mode || 'Cash'),
-      date: body.date || new Date().toISOString().slice(0, 10),
-      checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0,10) : null, // <-- added
-      createdAt: new Date().toISOString()
+    const patch = {
+      ...(body.name != null ? { name: String(body.name).trim() } : {}),
+      ...(body.room != null ? { room: Array.isArray(body.room) ? body.room.map(Number) : String(body.room).split(',').map(s=>Number(s.trim())).filter(Boolean) } : {}),
+      ...(body.days != null ? { days: Number(body.days) || 0 } : {}),
+      ...(body.amount != null ? { amount: Number(body.amount) || 0 } : {}),
+      ...(body.mode != null ? { mode: String(body.mode) } : {}),
+      ...(body.date != null ? { date: String(body.date).slice(0,10) } : {}),
+      ...(body.checkInYmd != null ? { checkInYmd: String(body.checkInYmd).slice(0,10) } : {}),
+      updatedAt: new Date().toISOString()
     };
-
-    await rentPaymentsCol.insertOne(doc);
+    await rentPaymentsCol.updateOne({ _id: dbId(id) }, { $set: patch });
     res.json({ ok: true });
   } catch (e) {
-    console.error('POST /api/rent-payment failed:', e);
+    console.error('PUT /api/rent-payment/:id', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+// Delete rent payment
+app.delete('/api/rent-payment/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    const { id } = req.params;
+    await rentPaymentsCol.deleteOne({ _id: dbId(id) });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/rent-payment/:id', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 
 
 // Add an expense
-app.post('/api/expense', async (req, res) => {
+// Delete expense
+app.delete('/api/expense/:id', async (req, res) => {
   try {
     await ensureDb();
-    if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-
-    const body = req.body || {};
-    const doc = {
-      description: String(body.description || '').trim(),
-      amount: Number(body.amount) || 0,
-      date: body.date || new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString()
-    };
-
-    await expensesCol.insertOne(doc);
+    const { id } = req.params;
+    await expensesCol.deleteOne({ _id: dbId(id) });
     res.json({ ok: true });
   } catch (e) {
-    console.error('POST /api/expense failed:', e);
+    console.error('DELETE /api/expense/:id', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+// Optional: Update expense description/amount/date
+app.put('/api/expense/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    const { id } = req.params;
+    const b = req.body || {};
+    const patch = {
+      ...(b.description != null ? { description: String(b.description) } : {}),
+      ...(b.amount != null ? { amount: Number(b.amount) || 0 } : {}),
+      ...(b.date != null ? { date: String(b.date).slice(0,10) } : {}),
+      updatedAt: new Date().toISOString()
+    };
+    await expensesCol.updateOne({ _id: dbId(id) }, { $set: patch });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('PUT /api/expense/:id', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 
 // Optional: record a checkout for LiveUpdate
 app.post('/api/checkout', async (req, res) => {
