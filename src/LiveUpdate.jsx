@@ -1,23 +1,27 @@
 // src/LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
-  ? import.meta.env.VITE_MONGO_API_BASE
-  : (window.__MONGO_API_BASE__ || '/api');
+const API_BASE =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+    ? import.meta.env.VITE_MONGO_API_BASE
+    : (window.__MONGO_API_BASE__ || '/api');
 
-// Theme tokens
+// Theme tokens (compact, high-contrast)
 const COLORS = {
-deep: '#2c3f34',
-cream: '#f7f5ee', // was #f0eee1
-muted: '#2c3d34ff', // was #6b7a72
-border: 'rgba(0,0,0,0.12)'
+  deep: '#2c3f34',
+  cream: '#f7f5ee',
+  muted: '#2c3d34ff',
+  border: 'rgba(0,0,0,0.12)',
+  btn: '#313e35',        // unified button color
+  btnText: '#f5f7f4'
 };
 
+// Polling helper
 function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -50,53 +54,58 @@ function usePolling(url, interval = 2500) {
   return { data, loading, error };
 }
 
+// Unified pill (tab) style with single color 313e35
+const PILL_COLOR = COLORS.btn;
 const Pill = ({ to, active, children }) => (
   <Link
     to={to}
     className="px-3 py-2 rounded-md text-sm whitespace-nowrap"
     style={{
-      color: active ? COLORS.cream : COLORS.deep,
-      background: active ? COLORS.deep : COLORS.cream,
-      border: `1px solid ${COLORS.border}`,
-      boxShadow: active ? '0 2px 6px rgba(0,0,0,0.12)' : 'none'
+      color: COLORS.btnText,
+      background: PILL_COLOR,
+      border: '1px solid rgba(0,0,0,0.18)',
+      boxShadow: active ? '0 2px 6px rgba(0,0,0,0.18)' : '0 1px 3px rgba(0,0,0,0.10)',
+      opacity: active ? 1 : 0.95,
+      transition: 'opacity 120ms ease'
     }}
+    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.opacity = active ? '1' : '0.95'; }}
   >
     {children}
   </Link>
 );
 
-// Legend helpers
+// Small legend dot
 const legendDot = (bg) => ({
-display: 'inline-block',
-width: 8, // was 10
-height: 8, // was 10
-borderRadius: 2, // was 3
-background: bg,
-verticalAlign: 'middle',
-marginRight: 5, // was 6
-border: '1px solid rgba(0,0,0,0.08)'
+  display: 'inline-block',
+  width: 8,
+  height: 8,
+  borderRadius: 2,
+  background: bg,
+  verticalAlign: 'middle',
+  marginRight: 5,
+  border: '1px solid rgba(0,0,0,0.08)'
 });
 
-// Room box style (bug-fixed)
+// Compact room tile
 const roomBoxStyle = (r) => {
-const base = {
-display: 'flex',
-alignItems: 'center',
-justifyContent: 'center',
-minHeight: 44, // was 56
-minWidth: 56, // was 72
-borderRadius: 8, // was 10
-fontWeight: 700, // was 800
-fontSize: 13, // NEW: helps density
-cursor: 'pointer',
-border: '1px solid rgba(0,0,0,0.12)',
-userSelect: 'none',
-boxShadow: '0 1px 1px rgba(0,0,0,0.04)', // lighter
-color: '#2c3f34'
-};
-if (r.status === 'reserved') return { ...base, background: '#ffe3a6' };
-if (r.status === 'occupied') return { ...base, background: '#bfe8cb' };
-return { ...base, background: '#ffffff' };
+  const base = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 44,                 // fixed height to remove vertical jitter
+    borderRadius: 8,
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: 'default',
+    border: '1px solid rgba(0,0,0,0.14)',
+    userSelect: 'none',
+    boxShadow: '0 1px 1px rgba(0,0,0,0.04)',
+    color: COLORS.deep
+  };
+  if (r.status === 'occupied') return { ...base, background: '#bfe8cb' };
+  if (r.status === 'reserved') return { ...base, background: '#ffe3a6' };
+  return { ...base, background: '#ffffff' };
 };
 
 // Normalize check-in date to yyyy-mm-dd
@@ -112,13 +121,12 @@ function normalizeCheckInYmd(guest) {
 
 export default function LiveUpdate() {
   const loc = useLocation();
-  const navigate = useNavigate();
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Search moved into Current Guests
+  // Search lives inside Current Guests card
   const [guestSearch, setGuestSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -166,7 +174,7 @@ export default function LiveUpdate() {
     return sums;
   }, [rentPayments]);
 
-  // Current Guests list
+  // Current Guests card
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -180,9 +188,9 @@ export default function LiveUpdate() {
       <div
         className="card"
         style={{
-          padding: 12, // was 16
-          marginBottom: 10, // was 12
-          borderRadius: 10, // was 12
+          padding: 12,
+          marginBottom: 10,
+          borderRadius: 10,
           boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
           background: COLORS.cream,
           border: `1px solid ${COLORS.border}`
@@ -196,7 +204,13 @@ export default function LiveUpdate() {
         <div style={{ marginBottom: 10 }}>
           <input
             className="input"
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1px solid ${COLORS.border}`, background: '#fff' }}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: `1px solid ${COLORS.border}`,
+              background: '#fff'
+            }}
             placeholder="Search guest or room..."
             value={guestSearch}
             onChange={(e) => setGuestSearch(e.target.value)}
@@ -265,12 +279,12 @@ export default function LiveUpdate() {
   const sub = path.split('/').pop();
 
   const renderSubpage = () => {
-if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
-if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
-if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
-if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
-return null;
-};
+    if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
+    if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
+    if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
+    if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
+    return null;
+  };
 
   return (
     <div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
@@ -289,40 +303,39 @@ return null;
       )}
 
       <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Rooms grid only on /liveupdate */}
+        {/* LEFT: Room Layout only on /liveupdate */}
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
             <div
               className="card"
               style={{
-                padding: 16,
-                marginBottom: 12,
-                borderRadius: 12,
+                padding: 12,
+                marginBottom: 10,
+                borderRadius: 10,
                 background: COLORS.cream,
                 boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
                 border: `1px solid ${COLORS.border}`
               }}
             >
-              <div style={{ fontWeight: 900, marginBottom: 10, color: COLORS.deep }}>Rooms Today</div>
+              <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.deep }}>Room Layout (Today)</div>
 
-              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
-                <div><span style={legendDot(COLORS.cream)} /> Free</div>
-                <div><span style={legendDot('rgba(255, 213, 128, 0.7)')} /> Reserved</div>
-                <div><span style={legendDot('rgba(139, 224, 164, 0.75)')} /> Occupied</div>
+              <div style={{ display: 'flex', gap: 10, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
+                <div><span style={legendDot('#ffffff')} /> Free</div>
+                <div><span style={legendDot('#ffe3a6')} /> Reserved</div>
+                <div><span style={legendDot('#bfe8cb')} /> Occupied</div>
               </div>
 
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
 
-                const gridCols = 'repeat(auto-fill, minmax(56px, 1fr))';
-
+                // Fixed 4 columns per floor for alignment and density
                 return (
                   <div key={floorNum} style={{ marginBottom: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
                       Floor {floorNum}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, alignItems: 'stretch' }}>
                       {list.map(r => (
                         <div
                           key={r.number}
@@ -335,7 +348,9 @@ return null;
                               : 'Free'
                           }
                         >
-                          {r.number}
+                          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            {String(r.number).padStart(2, '0')}
+                          </span>
                         </div>
                       ))}
                     </div>
