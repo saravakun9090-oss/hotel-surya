@@ -2802,7 +2802,12 @@ function RentPayments() {
           if (!fileName.endsWith(".json")) continue;
           const file = await fileHandle.getFile();
           const data = JSON.parse(await file.text());
-          rows.push({ ...data, _dateFolder: dateName, _fileName: fileName, _createdTime: file.lastModified });
+          rows.push({
+            ...data,
+            _dateFolder: dateName,
+            _fileName: fileName,
+            _createdTime: file.lastModified
+          });
         }
       }
       rows.sort((a, b) => b._createdTime - a._createdTime);
@@ -2861,8 +2866,15 @@ function RentPayments() {
     }
   }
   function handlePasswordCancel() { setAskPass(false); }
-  function enterEditMode(row) { setEditingRow(row._fileName); setEditDays(row.days || ""); setEditAmount(row.amount || ""); setEditMode(row.mode || "Cash"); }
 
+  function enterEditMode(row) {
+    setEditingRow(row._fileName);
+    setEditDays(row.days || "");
+    setEditAmount(row.amount || "");
+    setEditMode(row.mode || "Cash");
+  }
+
+  // Save local file and mirror to server (PUT) if server id exists
   async function saveEdit(row) {
     setConfirmMsg({
       text: "Save changes to this rent entry?",
@@ -2870,8 +2882,37 @@ function RentPayments() {
         try {
           const base = await getBaseFolder();
           const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
-          const updated = { ...row, days: Number(editDays), amount: Number(editAmount), mode: editMode };
+
+          const updated = {
+            ...row,
+            days: Number(editDays),
+            amount: Number(editAmount),
+            mode: editMode
+          };
+
+          // 1) Local file update
           await writeJSON(dir, row._fileName, updated);
+
+          // 2) Server mirror (if id available)
+          const sid = safeServerId(row);
+          if (sid) {
+            await fetch(`${API_BASE}/rent-payment/${encodeURIComponent(sid)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: updated.name,
+                room: updated.room,
+                days: updated.days,
+                amount: updated.amount,
+                mode: updated.mode,
+                date: row._dateFolder,
+                checkInYmd: updated.checkInYmd || null
+              })
+            });
+            // Optional immediate refresh
+            refreshLiveStateNow();
+          }
+
           showSuccess("✅ Entry updated successfully");
           setEditingRow(null);
           loadAll();
@@ -2884,11 +2925,22 @@ function RentPayments() {
   }
   function cancelEdit() { setEditingRow(null); }
 
+  // Delete local file and mirror to server (DELETE) if id available
   async function deleteEntry(row) {
     try {
       const base = await getBaseFolder();
       const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
+
+      // 1) Local delete
       await dir.removeEntry(row._fileName);
+
+      // 2) Server mirror
+      const sid = safeServerId(row);
+      if (sid) {
+        await fetch(`${API_BASE}/rent-payment/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+        refreshLiveStateNow();
+      }
+
       showSuccess("🗑 Entry deleted successfully");
       loadAll();
     } catch (err) {
@@ -2907,8 +2959,14 @@ function RentPayments() {
       {askPass && (
         <ModalCard>
           <h3>Enter Password</h3>
-          <input type="password" value={passValue} onChange={(e) => setPassValue(e.target.value)} maxLength={4}
-            className="input" style={{ textAlign: "center", fontSize: 18 }} />
+          <input
+            type="password"
+            value={passValue}
+            onChange={(e) => setPassValue(e.target.value)}
+            maxLength={4}
+            className="input"
+            style={{ textAlign: "center", fontSize: 18 }}
+          />
           {passError && <div style={{ color: "red", fontSize: 13 }}>{passError}</div>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button className="btn ghost" onClick={handlePasswordCancel}>Cancel</button>
@@ -2975,7 +3033,7 @@ function RentPayments() {
                   <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
                     <td>{r._dateFolder}</td>
                     <td>{r.name}</td>
-                    <td>{r.room}</td>
+                    <td>{Array.isArray(r.room) ? r.room.join(', ') : r.room}</td>
                     {editingRow === r._fileName ? (
                       <>
                         <td><input type="number" value={editDays} onChange={(e) => setEditDays(e.target.value)} style={{ width: 60 }} /></td>
@@ -3024,6 +3082,7 @@ function RentPayments() {
   );
 }
 
+
 // Reusable modal card
 function ModalCard({ children }) {
   return (
@@ -3056,7 +3115,7 @@ function ToastCard({ children, color }) {
 function ExpensePayments() {
   const ADMIN_PASS = "1234"; // Change your password
 
-  const [all, setAll] = useState([]); 
+  const [all, setAll] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -3155,11 +3214,22 @@ function ExpensePayments() {
   }
   function handlePasswordCancel() { setAskPass(false); }
 
+  // Delete local expense and mirror to server (DELETE)
   async function performDelete() {
     try {
       const base = await getBaseFolder();
       const dir = await ensurePath(base, ["Expenses", pendingRow._dateFolder]);
+
+      // 1) Local delete
       await dir.removeEntry(pendingRow._fileName);
+
+      // 2) Server mirror
+      const sid = safeServerId(pendingRow);
+      if (sid) {
+        await fetch(`${API_BASE}/expense/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+        refreshLiveStateNow();
+      }
+
       showSuccess("🗑 Expense deleted successfully");
       loadAll();
     } catch (err) {
@@ -3277,6 +3347,25 @@ function ExpensePayments() {
     </div>
   );
 }
+// ===== Shared API helpers =====
+const API_BASE =
+  (typeof window !== 'undefined' && window.__MONGO_API_BASE__) || '/api';
+
+function safeServerId(row) {
+  // Prefer the exact property you persist from server on create:
+  // serverId or id or _id are all commonly used. Adjust if your field name differs.
+  return row?.serverId || row?.id || row?._id || null;
+}
+
+// Optional: force-refresh state endpoint (LiveUpdate will still poll every ~2.5s)
+async function refreshLiveStateNow() {
+  try {
+    await fetch(`${API_BASE}/state`, { cache: 'no-store' });
+  } catch (e) {
+    console.warn('manual /state refresh failed', e);
+  }
+}
+
 
 
 
