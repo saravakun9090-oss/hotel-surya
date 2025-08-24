@@ -61,9 +61,9 @@ export default function ExpensesPage({ data }) {
   return (
     <div>
       {/* Header */}
-      <div className="header-row" style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+      <div className="header-row" style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div>
-          <div className="title">Expense Payments</div>
+          <div className="title" style={{ fontWeight: 900 }}>Expense Payments</div>
           <div style={{ color: "var(--muted)", marginTop: 4 }}>View, filter, and total all expenses</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -77,38 +77,40 @@ export default function ExpensesPage({ data }) {
         <input type="date" className="input" value={to} onChange={e => setTo(e.target.value)} />
         <input className="input" placeholder="Search description/date" value={q} onChange={e => setQ(e.target.value)} />
         <button className="btn ghost" onClick={clearFilters}>Clear Filters</button>
-        <div style={{ marginLeft: "auto", fontWeight: 700 }}>Total: ₹{totalAmount}</div>
+        <div style={{ marginLeft: "auto", fontWeight: 900 }}>Total: ₹{totalAmount}</div>
       </div>
 
       {/* Table */}
-      <div className="card" style={{ padding: 12, marginTop: 10 }}>
+      <div className="card" style={{ padding: 12, marginTop: 10, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
         {loading ? (
           <div>Loading...</div>
         ) : filtered.length === 0 ? (
           <div style={{ color: "var(--muted)" }}>No records match filters</div>
         ) : (
           <>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f5f5f5" }}>
-                  <th style={{ textAlign: "left", padding: 6 }}>Date</th>
-                  <th style={{ textAlign: "left", padding: 6 }}>Description</th>
-                  <th style={{ textAlign: "left", padding: 6 }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((r, idx) => (
-                  <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: 6 }}>{r._dateFolder}</td>
-                    <td style={{ padding: 6 }}>{r._desc}</td>
-                    <td style={{ padding: 6 }}>₹{r._amt}</td>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                <thead>
+                  <tr style={{ background: "#f5f5f5" }}>
+                    <th style={{ textAlign: "left", padding: 8 }}>Date</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Description</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Amount</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {pageRows.map((r, idx) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: 8 }}>{r._dateFolder}</td>
+                      <td style={{ padding: 8 }}>{r._desc}</td>
+                      <td style={{ padding: 8 }}>₹{r._amt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Pager */}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ color: "var(--muted)" }}>
                 Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filtered.length)} of {filtered.length}
               </div>
