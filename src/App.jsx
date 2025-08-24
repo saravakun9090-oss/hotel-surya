@@ -1823,8 +1823,6 @@ function CheckOut({ state, setState }) {
 
   // ---------- FILE HELPERS ----------
   async function findCheckinFile(base, checkInDate, room, name) {
-    // Simplified: scan the checkins folder for the date and find a file whose JSON contains the guest name
-    // and whose room (number or array) includes the requested room.
     const norm = (s) => String(s).toLowerCase().trim();
     const normalizedName = norm(name);
 
@@ -1878,10 +1876,7 @@ function CheckOut({ state, setState }) {
   }
 
   async function getTotalPayments(checkInDate, room, name, checkOutDate) {
-    // room may be a single number/string or an array of room numbers
-    const roomsSet = new Set(
-      (Array.isArray(room) ? room : [room]).map(r => Number(r))
-    );
+    const roomsSet = new Set((Array.isArray(room) ? room : [room]).map(r => Number(r)));
     let totalPayment = 0;
     try {
       const base = await getBaseFolder();
@@ -1898,12 +1893,8 @@ function CheckOut({ state, setState }) {
           const paidRoom = rentData.room;
           const paidRooms = Array.isArray(paidRoom) ? paidRoom.map(Number) : [Number(paidRoom)];
 
-          // include this rent entry if it matches the guest name and intersects the requested rooms
           const intersects = paidRooms.some(pr => roomsSet.has(Number(pr)));
-          if (
-            intersects &&
-            rentData.name?.trim().toLowerCase() === name.trim().toLowerCase()
-          ) {
+          if (intersects && rentData.name?.trim().toLowerCase() === name.trim().toLowerCase()) {
             totalPayment += Number(rentData.amount) || 0;
           }
         }
@@ -1929,15 +1920,13 @@ function CheckOut({ state, setState }) {
     data.checkOutDateTime = now.toISOString();
 
     const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
-    // Sum payments for the whole group (avoid double-counting payments saved against multiple rooms)
     const totalPayment = await getTotalPayments(checkInDate, rooms, name, ymd(now));
 
     const days = Math.max(1, Math.ceil((now - new Date(data.checkIn)) / (1000 * 60 * 60 * 24)));
-    // The stored `data.rate` is the group total per day (user-entered rate applies to the whole booking)
     const groupRatePerDay = Number(data.rate) || 0;
     const totalRent = days * groupRatePerDay;
 
-    data.rooms = rooms; // keep canonical array property
+    data.rooms = rooms;
     data.daysStayed = days;
     data.totalRent = totalRent;
     data.totalPaid = totalPayment;
@@ -1955,32 +1944,43 @@ function CheckOut({ state, setState }) {
   async function doCheckout(roomNumber) {
     try {
       const newState = { ...state, floors: { ...state.floors } };
-
-      // roomNumber may be a single number or an array of numbers (group checkout)
       const roomsToCheckout = Array.isArray(roomNumber) ? roomNumber.map(Number) : [Number(roomNumber)];
 
-      // Find guest info from first room to identify the checkin file
+      // Find guest info (from current state) to compute totals and for mirror POST
       let guestName = null;
       let guestCheckIn = null;
+      let guestContact = '';
       for (const fnum of Object.keys(newState.floors)) {
         for (const r of newState.floors[fnum]) {
           if (roomsToCheckout.includes(r.number) && r.guest) {
             guestName = r.guest.name;
             guestCheckIn = r.guest.checkIn ? new Date(r.guest.checkIn) : new Date();
+            guestContact = r.guest.contact || '';
             break;
           }
         }
         if (guestName) break;
       }
 
+      // Compute financials for mirror POST
+      const now = new Date();
+      const checkInISO = (guestCheckIn || new Date()).toISOString().slice(0, 10);
+      const nowISO = ymd(now);
+      const rate = await getRateFromCheckin(checkInISO, roomsToCheckout[0], guestName || 'Guest');
+      const days = Math.max(1, Math.ceil((now - (guestCheckIn || now)) / (1000 * 60 * 60 * 24)));
+      const totalRent = days * (Number(rate) || 0);
+      const totalPayment = await getTotalPayments(checkInISO, roomsToCheckout, guestName || 'Guest', nowISO);
+      const isTallied = Number(totalPayment || 0) >= Number(totalRent || 0);
+
       if (guestName) {
         await moveCheckinToCheckout(
-          (guestCheckIn || new Date()).toISOString().slice(0, 10),
+          checkInISO,
           roomsToCheckout[0],
           guestName || "Guest"
         );
       }
 
+      // Clear rooms in UI state
       for (const fnum of Object.keys(newState.floors)) {
         newState.floors[fnum] = newState.floors[fnum].map(r =>
           roomsToCheckout.includes(r.number) ? { ...r, status: 'free', guest: null } : r
@@ -1990,70 +1990,70 @@ function CheckOut({ state, setState }) {
       setState(newState);
       saveState(newState);
       showSuccess("✅ Check-Out completed successfully");
-      loadCheckoutList(); // refresh right panel
+      loadCheckoutList();
 
-      // Build a complete checkout doc and POST to server so LiveUpdate can show full details
-try {
-  const API_BASE =
-    window.__MONGO_API_BASE__ ||
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-    '/api';
+      // Mirror checkout to backend with complete details
+      try {
+        const API_BASE =
+          window.__MONGO_API_BASE__ ||
+          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+          '/api';
 
-  // Try to derive contact/check-in fields from the first matched room guest
-  let contact = '';
-  let checkInDate = '';
-  let checkInTime = '';
-  for (const fnum of Object.keys(newState.floors)) {
-    for (const r of newState.floors[fnum]) {
-      if (roomsToCheckout.includes(r.number) && r.guest) {
-        contact = r.guest.contact || '';
-        // normalize check-in date/time (prefer explicit fields if present)
-        if (r.guest.checkInDate) {
-          checkInDate = r.guest.checkInDate;
-        } else if (r.guest.checkIn) {
-          const d = new Date(r.guest.checkIn);
-          checkInDate = d.toLocaleDateString();
-          checkInTime = d.toLocaleTimeString();
+        // Re-derive check-in fields for display (use guestCheckIn if available)
+        let checkInDate = '';
+        let checkInTime = '';
+        if (guestCheckIn) {
+          checkInDate = guestCheckIn.toLocaleDateString();
+          checkInTime = guestCheckIn.toLocaleTimeString();
+        } else {
+          // As a fallback, try to locate a still-present guest record in original state
+          for (const fnum of Object.keys(state.floors)) {
+            for (const r of state.floors[fnum]) {
+              if (roomsToCheckout.includes(r.number) && r.guest) {
+                if (r.guest.checkInDate) checkInDate = r.guest.checkInDate;
+                if (r.guest.checkInTime) checkInTime = r.guest.checkInTime;
+                if (!checkInDate && r.guest.checkIn) {
+                  const d = new Date(r.guest.checkIn);
+                  checkInDate = d.toLocaleDateString();
+                  checkInTime = checkInTime || d.toLocaleTimeString();
+                }
+                break;
+              }
+            }
+          }
         }
-        if (r.guest.checkInTime && !checkInTime) checkInTime = r.guest.checkInTime;
-        break;
+
+        const checkOutDate = now.toLocaleDateString();
+        const checkOutTime = now.toLocaleTimeString();
+
+        await fetch(`${API_BASE}/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: guestName || 'Guest',
+            room: roomsToCheckout,
+            contact: guestContact || '',
+            checkInDate,
+            checkInTime,
+            checkOutDate,
+            checkOutTime,
+            daysStayed: days,
+            totalRent,
+            totalPaid: totalPayment,
+            paymentTallyStatus: isTallied ? 'tallied' : 'not-tallied',
+            checkOutDateTime: now.toISOString()
+          })
+        });
+      } catch (mirrorErr) {
+        console.warn('Remote checkout mirror failed:', mirrorErr);
       }
-    }
-  }
-
-  const now = new Date();
-  const checkOutDate = now.toLocaleDateString();
-  const checkOutTime = now.toLocaleTimeString();
-
-  await fetch(`${API_BASE}/checkout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: guestName || 'Guest',
-      room: roomsToCheckout, // array is fine; UI will render as "101, 102"
-      contact,               // Phone no
-      checkInDate,           // e.g., "23/08/2025" or "8/23/2025"
-      checkInTime,           // optional
-      checkOutDate,
-      checkOutTime,
-      daysStayed: typeof days !== 'undefined' ? days : undefined,
-      totalRent: typeof totalRent !== 'undefined' ? totalRent : undefined,
-      totalPaid: typeof totalPayment !== 'undefined' ? totalPayment : undefined,
-      paymentTallyStatus: tallyStatus ? 'tallied' : 'not-tallied',
-      checkOutDateTime: now.toISOString() // useful for sorting
-    })
-  });
-} catch (mirrorErr) {
-  console.warn('Remote checkout mirror failed:', mirrorErr);
-}
-
     } catch (err) {
       console.error(err);
       showError(err?.message || "❌ Failed to complete check-out");
     }
   }
 
-  // -------- NEW: LOAD ALL CHECKOUT FILES --------
+  // -------- LOAD ALL CHECKOUT FILES (local disk preview) --------
   async function loadCheckoutList() {
     try {
       const base = await getBaseFolder();
@@ -2070,7 +2070,6 @@ try {
         }
       }
 
-      // Sort latest first
       all.sort((a, b) => new Date(b.checkOutDateTime) - new Date(a.checkOutDateTime));
       setCheckoutList(all);
     } catch (err) {
@@ -2105,157 +2104,159 @@ try {
 
   const filteredCheckoutList = checkoutList.filter((c) => {
     const q = searchQuery.toLowerCase();
-    return (
-      c.name?.toLowerCase().includes(q) ||
-      String(Array.isArray(c.room) ? c.room.join(', ') : (c.room || "")).includes(q)
-    );
+    const name = (c.name || '').toLowerCase();
+    const roomStr = Array.isArray(c.room) ? c.room.join(', ') : (c.room || '');
+    return name.includes(q) || roomStr.includes(q);
   });
 
   return (
-    <div style={{ display: "flex", gap: 16 }}> {/* LEFT SIDE - OCCUPIED ROOMS */} <div style={{ flex: 1, minWidth: 0 }}> {successMsg && <ToastCard color="#16a34a">{successMsg}</ToastCard>} {errorMsg && <ToastCard color="#dc2626">{errorMsg}</ToastCard>}
-    {confirmMsg && (
-  <ModalCard>
-    <h3 style={{ marginTop: 0 }}>Confirm Check-Out</h3>
-    <div style={{ marginBottom: 12, whiteSpace: "pre-line" }}>
-      {confirmMsg.text}
-    </div>
-    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-      <button className="btn ghost" onClick={() => setConfirmMsg(null)}>
-        Cancel
-      </button>
-      <button
-        className="btn primary"
-        onClick={() => {
-          setConfirmMsg(null);
-          doCheckout(confirmMsg.roomNumber);
-        }}
-      >
-        Confirm
-      </button>
-    </div>
-  </ModalCard>
-)}
+    <div style={{ display: "flex", gap: 16 }}>
+      {/* LEFT SIDE - OCCUPIED ROOMS */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {successMsg && <ToastCard color="#16a34a">{successMsg}</ToastCard>}
+        {errorMsg && <ToastCard color="#dc2626">{errorMsg}</ToastCard>}
 
-<div className="card" style={{ padding: 12, marginBottom: 12 }}>
-  <h2 style={{ margin: 0, marginBottom: 8, }}>Check-Out</h2>
-
-  {occupied.length === 0 ? (
-    <div style={{ color: "var(--muted)" }}>No occupied rooms</div>
-  ) : (
-    <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {occupied.map((entry) => {
-        const checkIn = entry.guest?.checkIn ? new Date(entry.guest.checkIn) : new Date();
-        const now = new Date();
-        const days = Math.max(1, Math.ceil((now - checkIn) / (1000 * 60 * 60 * 24)));
-
-        const roomsLabel = entry.rooms.join(', ');
-
-        return (
-          <div
-            key={roomsLabel}
-            className="card"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: 10
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {entry.guest?.name}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                Rooms {roomsLabel}
-              </div>
+        {confirmMsg && (
+          <ModalCard>
+            <h3 style={{ marginTop: 0 }}>Confirm Check-Out</h3>
+            <div style={{ marginBottom: 12, whiteSpace: "pre-line" }}>
+              {confirmMsg.text}
             </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn ghost" onClick={() => setConfirmMsg(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setConfirmMsg(null);
+                  doCheckout(confirmMsg.roomNumber);
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </ModalCard>
+        )}
 
-            <button
-              className="btn primary"
-              onClick={async () => {
-                try {
-                  const checkInISO = checkIn.toISOString().slice(0, 10);
-                  const nowISO = ymd(now);
-                  const guestName = entry.guest?.name || "Guest";
+        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+          <h2 style={{ margin: 0, marginBottom: 8 }}>Check-Out</h2>
 
-                  // rate per room
-                  const rate = await getRateFromCheckin(checkInISO, entry.rooms[0], guestName);
-                  // NOTE: rate entered at check-in is treated as the total group rate (not per-room)
-                  const totalRent = days * (Number(rate) || 0);
-                  // Fetch total payments for the whole group (don't sum per-room)
-                  const totalPayment = await getTotalPayments(checkInISO, entry.rooms, guestName, nowISO);
-                  const tallyStatus = totalPayment >= totalRent;
+          {occupied.length === 0 ? (
+            <div style={{ color: "var(--muted)" }}>No occupied rooms</div>
+          ) : (
+            <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {occupied.map((entry) => {
+                const checkIn = entry.guest?.checkIn ? new Date(entry.guest.checkIn) : new Date();
+                const now = new Date();
+                const days = Math.max(1, Math.ceil((now - checkIn) / (1000 * 60 * 60 * 24)));
+                const roomsLabel = entry.rooms.join(', ');
 
-                  setConfirmMsg({
-                    roomNumber: entry.rooms, // keep array
-                    text: `Check out rooms ${roomsLabel}?
-                    Guest: ${guestName}
+                return (
+                  <div
+                    key={roomsLabel}
+                    className="card"
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 10 }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {entry.guest?.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        Rooms {roomsLabel}
+                      </div>
+                    </div>
+
+                    <button
+                      className="btn primary"
+                      onClick={async () => {
+                        try {
+                          const checkInISO = checkIn.toISOString().slice(0, 10);
+                          const nowISO = ymd(now);
+                          const guestName = entry.guest?.name || "Guest";
+
+                          const rate = await getRateFromCheckin(checkInISO, entry.rooms[0], guestName);
+                          const totalRent = days * (Number(rate) || 0);
+                          const totalPayment = await getTotalPayments(checkInISO, entry.rooms, guestName, nowISO);
+                          const tallyStatus = totalPayment >= totalRent;
+
+                          setConfirmMsg({
+                            roomNumber: entry.rooms,
+                            text: `Check out rooms ${roomsLabel}?
+Guest: ${guestName}
 Days Stayed: ${days}
 Total Rent: ₹${totalRent}
 Total Payment: ₹${totalPayment}
 Tally: ${tallyStatus ? "✅" : "❌"}`
-                  });
-                } catch (err) {
-                  showError("Failed to load payment data");
-                }
-              }}
-            >
-              Check-Out
-            </button>
-          </div>
-        );
-      })}
-</div>
-)}
-</div>
+                          });
+                        } catch (err) {
+                          showError("Failed to load payment data");
+                        }
+                      }}
+                    >
+                      Check-Out
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
-</div>
-{/* RIGHT SIDE - CHECKED OUT LIST */}
-
-<div style={{ flex: 1, minWidth: 0 }}> <div className="card" style={{ padding: 12, marginBottom: 12 }}> <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}> <h2 style={{ margin: 0, flex: 1,  }}>Checked-Out Guests</h2> <button onClick={() => navigate("/checkout-list")} className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}> Show All Checkout </button> </div>
-  <input
-    type="text"
-    placeholder="Search by name or room..."
-    value={searchQuery}
-    onChange={(e) => setSearchQuery(e.target.value)}
-    style={{
-      marginBottom: 8,
-      padding: "6px 8px",
-      width: "100%",
-      border: "1px solid var(--muted)",
-      borderRadius: 6
-    }}
-  />
-
-  <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-    {filteredCheckoutList.length === 0 ? (
-      <div style={{ color: "var(--muted)" }}>No checkouts found</div>
-    ) : (
-      filteredCheckoutList.map((c, i) => (
-        <div key={i} className="card" style={{ padding: 10 }}>
-          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {c.name}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            Room {c.room}
+      {/* RIGHT SIDE - CHECKED OUT LIST */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+            <h2 style={{ margin: 0, flex: 1 }}>Checked-Out Guests</h2>
+            <button onClick={() => navigate("/checkout-list")} className="pill" style={{background: 'var(--deep)', color: 'var(--cream)'}}> Show All Checkout </button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
-            <div>Check-In: {c.checkInDate} {c.checkInTime}</div>
-            <div>Check-Out: {c.checkOutDate} {c.checkOutTime}</div>
-            <div>Days Stayed: {c.daysStayed}</div>
-            <div>Rent: ₹{c.totalRent}</div>
-            <div>Total Paid: ₹{c.totalPaid}</div>
-            <div>Payment Status: {c.paymentTallyStatus === "tallied" ? "✅ Tallied" : "❌ Not Tallied"}</div>
+          <input
+            type="text"
+            placeholder="Search by name or room..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              marginBottom: 8,
+              padding: "6px 8px",
+              width: "100%",
+              border: "1px solid var(--muted)",
+              borderRadius: 6
+            }}
+          />
+
+          <div className="list" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filteredCheckoutList.length === 0 ? (
+              <div style={{ color: "var(--muted)" }}>No checkouts found</div>
+            ) : (
+              filteredCheckoutList.map((c, i) => (
+                <div key={i} className="card" style={{ padding: 10 }}>
+                  <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    Room {Array.isArray(c.room) ? c.room.join(', ') : (c.room || '—')}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8, fontSize: 12 }}>
+                    <div>Check-In: {c.checkInDate} {c.checkInTime}</div>
+                    <div>Check-Out: {c.checkOutDate} {c.checkOutTime}</div>
+                    <div>Days Stayed: {c.daysStayed}</div>
+                    <div>Rent: ₹{c.totalRent}</div>
+                    <div>Total Paid: ₹{c.totalPaid}</div>
+                    <div>Payment Status: {String(c.paymentTallyStatus).toLowerCase() === "tallied" ? "✅ Tallied" : "❌ Not Tallied"}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
-      ))
-    )}
-  </div>
-</div>
-</div> </div>
+      </div>
+    </div>
   );
 }
+
 
 
 function CheckoutListPage() {
