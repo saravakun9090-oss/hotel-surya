@@ -14,7 +14,7 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
 const COLORS = {
 deep: '#2c3f34',
 cream: '#f7f5ee', // was #f0eee1
-muted: '#92caacff', // was #6b7a72
+muted: '#2c3d34ff', // was #6b7a72
 border: 'rgba(0,0,0,0.12)'
 };
 
