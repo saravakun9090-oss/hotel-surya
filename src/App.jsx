@@ -1835,7 +1835,6 @@ function CheckOut({ state, setState }) {
         try {
           const file = await handle.getFile();
           const data = JSON.parse(await file.text());
-          const fileNameMatches = String(entryName).toLowerCase();
           const dataName = norm(data.name || "");
           const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
           if (dataName === normalizedName && rooms.includes(Number(room))) {
@@ -1930,13 +1929,13 @@ function CheckOut({ state, setState }) {
     data.checkOutDateTime = now.toISOString();
 
     const rooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
-  // Sum payments for the whole group (avoid double-counting payments saved against multiple rooms)
-  const totalPayment = await getTotalPayments(checkInDate, rooms, name, ymd(now));
+    // Sum payments for the whole group (avoid double-counting payments saved against multiple rooms)
+    const totalPayment = await getTotalPayments(checkInDate, rooms, name, ymd(now));
 
     const days = Math.max(1, Math.ceil((now - new Date(data.checkIn)) / (1000 * 60 * 60 * 24)));
-  // The stored `data.rate` is the group total per day (user-entered rate applies to the whole booking)
-  const groupRatePerDay = Number(data.rate) || 0;
-  const totalRent = days * groupRatePerDay;
+    // The stored `data.rate` is the group total per day (user-entered rate applies to the whole booking)
+    const groupRatePerDay = Number(data.rate) || 0;
+    const totalRent = days * groupRatePerDay;
 
     data.rooms = rooms; // keep canonical array property
     data.daysStayed = days;
@@ -1992,6 +1991,27 @@ function CheckOut({ state, setState }) {
       saveState(newState);
       showSuccess("✅ Check-Out completed successfully");
       loadCheckoutList(); // refresh right panel
+
+      // NEW: Mirror checkout to backend for LiveUpdate (safe no-op if backend not configured)
+      try {
+        const API_BASE =
+          window.__MONGO_API_BASE__ ||
+          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+          '/api';
+
+        // Minimal payload; you can enrich with more fields if needed
+        await fetch(`${API_BASE}/checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: guestName || 'Guest',
+            rooms: roomsToCheckout,
+            checkOutDateTime: new Date().toISOString()
+          })
+        });
+      } catch (mirrorErr) {
+        console.warn('Remote checkout mirror failed:', mirrorErr);
+      }
     } catch (err) {
       console.error(err);
       showError(err?.message || "❌ Failed to complete check-out");
@@ -2125,8 +2145,8 @@ function CheckOut({ state, setState }) {
 
                   // rate per room
                   const rate = await getRateFromCheckin(checkInISO, entry.rooms[0], guestName);
-                // NOTE: rate entered at check-in is treated as the total group rate (not per-room)
-                const totalRent = days * (Number(rate) || 0);
+                  // NOTE: rate entered at check-in is treated as the total group rate (not per-room)
+                  const totalRent = days * (Number(rate) || 0);
                   // Fetch total payments for the whole group (don't sum per-room)
                   const totalPayment = await getTotalPayments(checkInISO, entry.rooms, guestName, nowISO);
                   const tallyStatus = totalPayment >= totalRent;
@@ -2201,6 +2221,7 @@ Tally: ${tallyStatus ? "✅" : "❌"}`
 </div> </div>
   );
 }
+
 
 function CheckoutListPage() {
   const [checkoutList, setCheckoutList] = useState([]);
@@ -3225,7 +3246,7 @@ function ExpensePayments() {
 
 function Accounts({ state }) {
   const navigate = useNavigate();
-const [rentForm, setRentForm] = useState({
+  const [rentForm, setRentForm] = useState({
     name: "",
     room: "",
     days: "",
@@ -3235,11 +3256,10 @@ const [rentForm, setRentForm] = useState({
 
   const [expForm, setExpForm] = useState({ desc: "", amount: "" });
   const [rentMsg, setRentMsg] = useState("");
-const [expMsg, setExpMsg] = useState("");
+  const [expMsg, setExpMsg] = useState("");
   const [listType, setListType] = useState(null); // "rent" | "expense" | null
   const [listItems, setListItems] = useState([]);
 
-  // 🔹 Compute occupied rooms
   // 🔹 Compute occupied rooms grouped by guest (multi-room bookings shown as one option)
   const occupiedRooms = [];
   {
@@ -3270,6 +3290,7 @@ const [expMsg, setExpMsg] = useState("");
       name: selected ? selected.guestName : ''
     }));
   };
+
   const submitRent = async (e) => {
     e.preventDefault();
 
@@ -3303,265 +3324,306 @@ const [expMsg, setExpMsg] = useState("");
       await writeJSON(rentDir, fileName, rentData);
       // ✅ Refresh today's lists instantly
       await loadTodayData();
+
+      // NEW: Mirror to backend for LiveUpdate (safe no-op if backend not configured)
+      try {
+        const API_BASE =
+          window.__MONGO_API_BASE__ ||
+          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+          '/api';
+        await fetch(`${API_BASE}/rent-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: rentData.name,
+            room: Array.isArray(rentData.room)
+              ? rentData.room
+              : String(rentData.room || '')
+                  .split(',')
+                  .map(s => Number(s.trim()))
+                  .filter(Boolean),
+            days: Number(rentData.days) || 0,
+            amount: Number(rentData.amount) || 0,
+            mode: rentData.mode || 'Cash',
+            // Use YYYY-MM-DD for server-side sort consistency
+            date: new Date().toISOString().slice(0, 10)
+          })
+        });
+      } catch (mirrorErr) {
+        console.warn('Remote rent-payment mirror failed:', mirrorErr);
+      }
     } catch (err) {
       console.warn("Failed to save rent", err);
       alert("Failed to save rent.");
     }
   };
 
-
   const submitExpense = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!expForm.desc || !expForm.amount) {
-    alert("Please fill all Expense fields.");
-    return;
-  }
-
-  const amountNum = Number(expForm.amount);
-  if (Number.isNaN(amountNum) || amountNum <= 0) {
-    alert("Enter a valid amount");
-    return;
-  }
-
-  try {
-    const base = await getBaseFolder();
-    if (!base) {
-      alert("Storage not connected");
+    if (!expForm.desc || !expForm.amount) {
+      alert("Please fill all Expense fields.");
       return;
     }
 
-    setExpForm({ desc: "", amount: "" });
-    setExpMsg("✅ Expense entry saved successfully.");
-    
-    setTimeout(() => setExpMsg(""), 3000);
-
-    const today = ymd(new Date());
-    const expDir = await ensurePath(base, ["Expenses", today]);
-
-    const safeDesc = String(expForm.desc).replace(/[^\w\-]+/g, "_");
-    const fileName = `expense-${safeDesc}-${Date.now()}.json`;
-
-    const expenseData = {
-      description: expForm.desc,
-      amount: amountNum,
-      date: new Date().toISOString(),
-    };
-
-    await writeJSON(expDir, fileName, expenseData);
-    // 🔹 Refresh today's lists instantly
-    await loadTodayData();
-    
-  } catch (err) {
-    console.warn("Failed to save expense", err);
-    alert("Failed to save expense.");
-  }
-};
-
-const [todayRent, setTodayRent] = useState([]);
-const [todayExpenses, setTodayExpenses] = useState([]);
-
-useEffect(() => {
-  loadTodayData();
-}, []);
-
-async function loadTodayData() {
-  try {
-    const base = await getBaseFolder();
-    if (!base) return;
-    const today = ymd(new Date());
-
-    // Rent
-    const rentDir = await ensurePath(base, ["RentCollections", today]);
-    const rentArr = [];
-    for await (const [name, handle] of rentDir.entries()) {
-      if (handle.kind === "file" && name.endsWith(".json")) {
-        const file = await handle.getFile();
-        const data = JSON.parse(await file.text());
-        data._createdTime = file.lastModified; // ✅ store creation time
-        rentArr.push(data);
-      }
+    const amountNum = Number(expForm.amount);
+    if (Number.isNaN(amountNum) || amountNum <= 0) {
+      alert("Enter a valid amount");
+      return;
     }
-    // ✅ Sort newest first
-    rentArr.sort((a, b) => b._createdTime - a._createdTime);
-    setTodayRent(rentArr);
 
-    // Expenses
-    const expDir = await ensurePath(base, ["Expenses", today]);
-    const expArr = [];
-    for await (const [name, handle] of expDir.entries()) {
-      if (handle.kind === "file" && name.endsWith(".json")) {
-        const file = await handle.getFile();
-        const data = JSON.parse(await file.text());
-        data._createdTime = file.lastModified; // ✅ store creation time
-        expArr.push(data);
+    try {
+      const base = await getBaseFolder();
+      if (!base) {
+        alert("Storage not connected");
+        return;
       }
+
+      setExpForm({ desc: "", amount: "" });
+      setExpMsg("✅ Expense entry saved successfully.");
+      setTimeout(() => setExpMsg(""), 3000);
+
+      const today = ymd(new Date());
+      const expDir = await ensurePath(base, ["Expenses", today]);
+
+      const safeDesc = String(expForm.desc).replace(/[^\w\-]+/g, "_");
+      const fileName = `expense-${safeDesc}-${Date.now()}.json`;
+
+      const expenseData = {
+        description: expForm.desc,
+        amount: amountNum,
+        date: new Date().toISOString(),
+      };
+
+      await writeJSON(expDir, fileName, expenseData);
+      // 🔹 Refresh today's lists instantly
+      await loadTodayData();
+
+      // NEW: Mirror to backend for LiveUpdate (safe no-op if backend not configured)
+      try {
+        const API_BASE =
+          window.__MONGO_API_BASE__ ||
+          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+          '/api';
+        await fetch(`${API_BASE}/expense`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: expenseData.description,
+            amount: Number(expenseData.amount) || 0,
+            // Use YYYY-MM-DD for server-side sort consistency
+            date: new Date().toISOString().slice(0, 10)
+          })
+        });
+      } catch (mirrorErr) {
+        console.warn('Remote expense mirror failed:', mirrorErr);
+      }
+    } catch (err) {
+      console.warn("Failed to save expense", err);
+      alert("Failed to save expense.");
     }
-    // ✅ Sort newest first
-    expArr.sort((a, b) => b._createdTime - a._createdTime);
-    setTodayExpenses(expArr);
+  };
 
-  } catch (err) {
-    console.error("Failed to load today's collections", err);
+  const [todayRent, setTodayRent] = useState([]);
+  const [todayExpenses, setTodayExpenses] = useState([]);
+
+  useEffect(() => {
+    loadTodayData();
+  }, []);
+
+  async function loadTodayData() {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return;
+      const today = ymd(new Date());
+
+      // Rent
+      const rentDir = await ensurePath(base, ["RentCollections", today]);
+      const rentArr = [];
+      for await (const [name, handle] of rentDir.entries()) {
+        if (handle.kind === "file" && name.endsWith(".json")) {
+          const file = await handle.getFile();
+          const data = JSON.parse(await file.text());
+          data._createdTime = file.lastModified; // ✅ store creation time
+          rentArr.push(data);
+        }
+      }
+      // ✅ Sort newest first
+      rentArr.sort((a, b) => b._createdTime - a._createdTime);
+      setTodayRent(rentArr);
+
+      // Expenses
+      const expDir = await ensurePath(base, ["Expenses", today]);
+      const expArr = [];
+      for await (const [name, handle] of expDir.entries()) {
+        if (handle.kind === "file" && name.endsWith(".json")) {
+          const file = await handle.getFile();
+          const data = JSON.parse(await file.text());
+          data._createdTime = file.lastModified; // ✅ store creation time
+          expArr.push(data);
+        }
+      }
+      // ✅ Sort newest first
+      expArr.sort((a, b) => b._createdTime - a._createdTime);
+      setTodayExpenses(expArr);
+
+    } catch (err) {
+      console.error("Failed to load today's collections", err);
+    }
   }
-}
-
-
 
   return (
     <div>
       {/* Header */}
-<div className="header-row" style={{
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: 12
-}}>
-  <div className="title">Accounts</div>
+      <div className="header-row" style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 12
+      }}>
+        <div className="title">Accounts</div>
 
-  <div style={{ display: "flex", gap: 10 }}>
-    <button
-      onClick={() => navigate("/rent-payments")}
-      className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
-    >
-      📑 Show All Rent Payments
-    </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={() => navigate("/rent-payments")}
+            className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
+          >
+            📑 Show All Rent Payments
+          </button>
 
-    <button
-      onClick={() => navigate("/expense-payments")}
-      className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
-    >
-      💰 Show All Expenses
-    </button>
-  </div>
-</div>
-
+          <button
+            onClick={() => navigate("/expense-payments")}
+            className="pill" style={{background: 'var(--deep)', color: 'var(--cream)',}}
+          >
+            💰 Show All Expenses
+          </button>
+        </div>
+      </div>
 
       <div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-    gap: 20,
-    marginBottom: 20,alignItems: "start" 
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 20,
+          marginBottom: 20,alignItems: "start" 
+        }}
+      >
+        {/* Rent Collection */}
+        <div className="card" style={{ padding: 16 }}>
+          <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Rent Collection</h3>
+          <form onSubmit={submitRent} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <select className="input" value={rentForm.room} onChange={(e) => handleRoomChange(e.target.value)}>
+              <option value="">Select Occupied Room</option>
+              {occupiedRooms.map(r => (
+                <option key={r.rooms.join('_')} value={r.rooms.join(',')}>
+                  Rooms {r.rooms.join(', ')} — {r.guestName}
+                </option>
+              ))}
+            </select>
+            <input className="input" placeholder="Guest Name" value={rentForm.name} readOnly />
 
-  }}
->
-  {/* Rent Collection */}
-  <div className="card" style={{ padding: 16 }}>
-    <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Rent Collection</h3>
-    <form onSubmit={submitRent} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <select className="input" value={rentForm.room} onChange={(e) => handleRoomChange(e.target.value)}>
-        <option value="">Select Occupied Room</option>
-        {occupiedRooms.map(r => (
-          <option key={r.rooms.join('_')} value={r.rooms.join(',')}>
-            Rooms {r.rooms.join(', ')} — {r.guestName}
-          </option>
-        ))}
-      </select>
-      <input className="input" placeholder="Guest Name" value={rentForm.name} readOnly />
+            <input type="number" className="input" placeholder="Number of Days"
+              value={rentForm.days || ""} min="1"
+              onChange={(e) => setRentForm({ ...rentForm, days: e.target.value })} />
 
-      <input type="number" className="input" placeholder="Number of Days"
-        value={rentForm.days || ""} min="1"
-        onChange={(e) => setRentForm({ ...rentForm, days: e.target.value })} />
+            <input type="number" className="input" placeholder="Amount"
+              value={rentForm.amount}
+              onChange={(e) => setRentForm({ ...rentForm, amount: e.target.value })} />
 
-      <input type="number" className="input" placeholder="Amount"
-        value={rentForm.amount}
-        onChange={(e) => setRentForm({ ...rentForm, amount: e.target.value })} />
+            <select className="input" value={rentForm.mode}
+              onChange={(e) => setRentForm({ ...rentForm, mode: e.target.value })}>
+              <option value="Cash">Cash</option>
+              <option value="GPay">GPay</option>
+            </select>
 
-      <select className="input" value={rentForm.mode}
-        onChange={(e) => setRentForm({ ...rentForm, mode: e.target.value })}>
-        <option value="Cash">Cash</option>
-        <option value="GPay">GPay</option>
-      </select>
+            <button className="btn primary" type="submit">Submit Rent</button>
+          </form>
+          {rentMsg && <div style={{ marginTop: 10, color: "green", fontWeight: "bold" }}>{rentMsg}</div>}
+        </div>
 
-      <button className="btn primary" type="submit">Submit Rent</button>
-    </form>
-    {rentMsg && <div style={{ marginTop: 10, color: "green", fontWeight: "bold" }}>{rentMsg}</div>}
-  </div>
+        {/* Expenses */}
+        <div className="card" style={{ padding: 16,}}>
+          <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Expenses</h3>
+          <form onSubmit={submitExpense} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input className="input" placeholder="Expense Description" value={expForm.desc}
+              onChange={(e) => setExpForm({ ...expForm, desc: e.target.value })} />
 
-  {/* Expenses */}
-  <div className="card" style={{ padding: 16,}}>
-    <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Expenses</h3>
-    <form onSubmit={submitExpense} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <input className="input" placeholder="Expense Description" value={expForm.desc}
-        onChange={(e) => setExpForm({ ...expForm, desc: e.target.value })} />
+            <input type="number" className="input" placeholder="Amount"
+              value={expForm.amount}
+              onChange={(e) => setExpForm({ ...expForm, amount: e.target.value })} />
 
-      <input type="number" className="input" placeholder="Amount"
-        value={expForm.amount}
-        onChange={(e) => setExpForm({ ...expForm, amount: e.target.value })} />
+            <button className="btn primary" type="submit">Submit Expense</button>
+          </form>
+          {expMsg && <div style={{ marginTop: 10, color: "green", fontWeight: "bold" }}>{expMsg}</div>}
+        </div>
+      </div>
 
-      <button className="btn primary" type="submit">Submit Expense</button>
-    </form>
-    {expMsg && <div style={{ marginTop: 10, color: "green", fontWeight: "bold" }}>{expMsg}</div>}
-  </div>
-</div>
+      {/* Today's Collections & Expenses */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 20,
+          marginTop: 10,
+          alignItems: "start" 
+        }}
+      >
+        {/* Today's Rent */}
+        <div className="card" style={{ padding: 16 }}>
+          <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Today's Rent Collections</h3>
+          {todayRent.length === 0 ? (
+            <div style={{ color: "var(--muted)" }}>No rent collected today</div>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+              {todayRent.map((r, idx) => (
+                <li
+                  key={idx}
+                  style={{
+                    padding: "6px 0",
+                    borderBottom: "1px solid #f0f0f0",
+                    display: "flex",
+                    justifyContent: "space-between"
+                  }}
+                >
+                  <div>
+                    Rooms {Array.isArray(r.room) ? r.room.join(', ') : r.room} — <strong>{r.name}</strong>
+                  </div>
+                  <div style={{ fontWeight: 600 }}>{r.days} Day - ₹{r.amount}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
-{/* Today's Collections & Expenses */}
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-    gap: 20,
-    marginTop: 10,
-    alignItems: "start" 
-  }}
->
-  {/* Today's Rent */}
-  <div className="card" style={{ padding: 16 }}>
-    <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Today's Rent Collections</h3>
-    {todayRent.length === 0 ? (
-      <div style={{ color: "var(--muted)" }}>No rent collected today</div>
-    ) : (
-      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-        {todayRent.map((r, idx) => (
-          <li
-            key={idx}
-            style={{
-              padding: "6px 0",
-              borderBottom: "1px solid #f0f0f0",
-              display: "flex",
-              justifyContent: "space-between"
-            }}
-          >
-            <div>
-              Rooms {Array.isArray(r.room) ? r.room.join(', ') : r.room} — <strong>{r.name}</strong>
-            </div>
-            <div style={{ fontWeight: 600 }}>{r.days} Day - ₹{r.amount}</div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-
-  {/* Today's Expenses */}
-  <div className="card" style={{ padding: 16 }}>
-    <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Today's Expenses</h3>
-    {todayExpenses.length === 0 ? (
-      <div style={{ color: "var(--muted)" }}>No expenses today</div>
-    ) : (
-      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-        {todayExpenses.map((e, idx) => (
-          <li
-            key={idx}
-            style={{
-              padding: "6px 0",
-              borderBottom: "1px solid #f0f0f0",
-              display: "flex",
-              justifyContent: "space-between"
-            }}
-          >
-            <div>{e.description}</div>
-            <div style={{ fontWeight: 600 }}>₹{e.amount}</div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-</div>
-      
+        {/* Today's Expenses */}
+        <div className="card" style={{ padding: 16 }}>
+          <h3 style={{ color: "var(--deep)", marginBottom: 10,fontWeight: 900 }}>Today's Expenses</h3>
+          {todayExpenses.length === 0 ? (
+            <div style={{ color: "var(--muted)" }}>No expenses today</div>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+              {todayExpenses.map((e, idx) => (
+                <li
+                  key={idx}
+                  style={{
+                    padding: "6px 0",
+                    borderBottom: "1px solid #f0f0f0",
+                    display: "flex",
+                    justifyContent: "space-between"
+                  }}
+                >
+                  <div>{e.description}</div>
+                  <div style={{ fontWeight: 600 }}>₹{e.amount}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
+
 
 function buildScanFolders(dateStr) {
   if (!dateStr) return null;
