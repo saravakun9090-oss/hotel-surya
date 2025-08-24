@@ -14,7 +14,6 @@ app.use(express.json());
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME || 'hotel_surya';
-// Keep consistent across repo: 'state' or 'app_state'
 const COLLECTION = process.env.COLLECTION || 'state';
 const PORT = process.env.PORT || 4000;
 
@@ -27,7 +26,7 @@ let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
 
-// Helper to coerce string id to ObjectId safely
+// Helper to coerce string -> ObjectId
 function dbId(id) {
   try { return new ObjectId(String(id)); } catch { return null; }
 }
@@ -40,18 +39,11 @@ async function initDb() {
   if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
 
   console.log('[DB] Connecting to Mongo...');
-  dbClient = new MongoClient(MONGO_URI, {
-    maxPoolSize: 10,
-    serverSelectionTimeoutMS: 8000,
-  });
+  dbClient = new MongoClient(MONGO_URI, { maxPoolSize: 10, serverSelectionTimeoutMS: 8000 });
   await dbClient.connect();
 
   db = dbClient.db(DB_NAME);
-
-  // Use env-configured collection name consistently
   col = db.collection(COLLECTION);
-
-  // GridFS bucket (uploads)
   bucket = new GridFSBucket(db, { bucketName: 'uploads' });
 
   checkoutsCol    = db.collection('checkouts');
@@ -69,11 +61,7 @@ async function initDb() {
 
 async function ensureDb() {
   if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
-  try {
-    await initDb();
-  } catch (e) {
-    console.error('[DB] ensureDb error:', e);
-  }
+  try { await initDb(); } catch (e) { console.error('[DB] ensureDb error:', e); }
 }
 
 app.get('/api/ping', async (req, res) => {
@@ -86,15 +74,10 @@ app.get('/api/debug', async (req, res) => {
   try {
     await ensureDb();
     const info = {
-      ok: !!col,
-      db: DB_NAME,
-      collection: COLLECTION,
-      hasMongoUri: !!MONGO_URI
+      ok: !!col, db: DB_NAME, collection: COLLECTION, hasMongoUri: !!MONGO_URI
     };
     res.json(info);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e) });
-  }
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 
 // multer memory storage
@@ -119,9 +102,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       .on('finish', (file) => {
         res.json({ ok: true, id: file._id.toString(), filename: file.filename });
       });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e) });
-  }
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 
 // Download by id
@@ -134,12 +115,10 @@ app.get('/api/download/:id', async (req, res) => {
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => res.status(404).send(String(err)));
     downloadStream.pipe(res);
-  } catch (e) {
-    res.status(500).send(String(e));
-  }
+  } catch (e) { res.status(500).send(String(e)); }
 });
 
-// Return combined state (recent-first)
+// Return combined state (recent-first, include ids)
 app.get('/api/state', async (req, res) => {
   try {
     await ensureDb();
@@ -150,7 +129,6 @@ app.get('/api/state', async (req, res) => {
     const doc = await col.findOne({ _id: 'singleton' });
     const baseState = doc?.state || {};
 
-    // Include ids so client can edit/delete precisely
     const [checkouts, rentPayments, expenses] = await Promise.all([
       checkoutsCol.find({}).sort({ checkOutDateTime: -1, _id: -1 }).toArray(),
       rentPaymentsCol.find({}).sort({ date: -1, _id: -1 }).toArray(),
@@ -188,37 +166,39 @@ app.post('/api/state', async (req, res) => {
 
 /* ========= RENT PAYMENTS ========= */
 
-// Create rent payment (needed to avoid 404)
+// Create
 app.post('/api/rent-payment', async (req, res) => {
   try {
     await ensureDb();
-    const b = req.body || {};
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const body = req.body || {};
     const doc = {
-      name: String(b.name || '').trim(),
-      room: Array.isArray(b.room)
-        ? b.room.map(Number)
-        : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean),
-      days: Number(b.days) || 0,
-      amount: Number(b.amount) || 0,
-      mode: String(b.mode || 'Cash'),
-      date: String(b.date || '').slice(0, 10),
-      checkInYmd: b.checkInYmd ? String(b.checkInYmd).slice(0, 10) : null,
+      name: String(body.name || '').trim(),
+      room: Array.isArray(body.room)
+        ? body.room.map(Number)
+        : String(body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean),
+      days: Number(body.days) || null,
+      amount: Number(body.amount) || 0,
+      mode: String(body.mode || 'Cash'),
+      date: body.date || new Date().toISOString().slice(0, 10),
+      checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0,10) : null,
       createdAt: new Date().toISOString()
     };
+
     const result = await rentPaymentsCol.insertOne(doc);
     res.json({ ok: true, id: String(result.insertedId) });
   } catch (e) {
-    console.error('POST /api/rent-payment', e);
+    console.error('POST /api/rent-payment failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Update rent payment
+// Update
 app.put('/api/rent-payment/:id', async (req, res) => {
   try {
     await ensureDb();
-    const { id } = req.params;
-    const _id = dbId(id);
+    const _id = dbId(req.params.id);
     if (!_id) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     const body = req.body || {};
@@ -240,12 +220,11 @@ app.put('/api/rent-payment/:id', async (req, res) => {
   }
 });
 
-// Delete rent payment
+// Delete
 app.delete('/api/rent-payment/:id', async (req, res) => {
   try {
     await ensureDb();
-    const { id } = req.params;
-    const _id = dbId(id);
+    const _id = dbId(req.params.id);
     if (!_id) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     await rentPaymentsCol.deleteOne({ _id });
@@ -258,31 +237,33 @@ app.delete('/api/rent-payment/:id', async (req, res) => {
 
 /* ========= EXPENSES ========= */
 
-// Create expense (needed to avoid 404)
+// Create
 app.post('/api/expense', async (req, res) => {
   try {
     await ensureDb();
-    const b = req.body || {};
+    if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const body = req.body || {};
     const doc = {
-      description: String(b.description || '').trim(),
-      amount: Number(b.amount) || 0,
-      date: String(b.date || '').slice(0,10),
+      description: String(body.description || '').trim(),
+      amount: Number(body.amount) || 0,
+      date: body.date || new Date().toISOString().slice(0, 10),
       createdAt: new Date().toISOString()
     };
+
     const result = await expensesCol.insertOne(doc);
     res.json({ ok: true, id: String(result.insertedId) });
   } catch (e) {
-    console.error('POST /api/expense', e);
+    console.error('POST /api/expense failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Update expense
+// Update (optional, if you add editing for expenses)
 app.put('/api/expense/:id', async (req, res) => {
   try {
     await ensureDb();
-    const { id } = req.params;
-    const _id = dbId(id);
+    const _id = dbId(req.params.id);
     if (!_id) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     const b = req.body || {};
@@ -300,12 +281,11 @@ app.put('/api/expense/:id', async (req, res) => {
   }
 });
 
-// Delete expense
+// Delete
 app.delete('/api/expense/:id', async (req, res) => {
   try {
     await ensureDb();
-    const { id } = req.params;
-    const _id = dbId(id);
+    const _id = dbId(req.params.id);
     if (!_id) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     await expensesCol.deleteOne({ _id });
@@ -334,13 +314,11 @@ app.post('/api/checkout', async (req, res) => {
   }
 });
 
-// 404 catch-all should be last
-app.use((req, res) => {
-  res.status(404).json({ ok: false, error: 'Not Found' });
-});
+// 404 catch-all last
+app.use((req, res) => res.status(404).json({ ok: false, error: 'Not Found' }));
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
-  await ensureDb(); // don’t crash if DB missing; routes will 503 until configured
+  await ensureDb();
   app.listen(PORT, () => console.log(`[Server] Listening on ${PORT}`));
 })();
