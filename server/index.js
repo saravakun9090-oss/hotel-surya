@@ -27,7 +27,7 @@ let expensesCol;
 async function initDb() {
   if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
 
-  dbClient = await MongoClient.connect(MONGO_URI);
+  dbClient = new MongoClient(MONGO_URI);
   db = dbClient.db(DB_NAME);
 
   col = db.collection('state');
@@ -96,7 +96,7 @@ app.get('/api/download/:id', async (req, res) => {
     await ensureDb();
     if (!bucket) return res.status(500).send('GridFS not initialized');
     const id = req.params.id;
-    const _id = new ObjectId(req.params.id);
+    const _id = new dbClient.bson.ObjectId(id);
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => res.status(404).send(String(err)));
     downloadStream.pipe(res);
