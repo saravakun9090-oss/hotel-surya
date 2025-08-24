@@ -3,15 +3,27 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { BrowserRouter } from 'react-router-dom'
-import './index.postcss' // This must include @tailwind base/components/utilities
+import './index.postcss'
 
-// Ensure frontend points to backend API in development to avoid Vite serving index.html
-// If you prefer proxying via Vite, remove this and add a proxy in vite.config.js instead.
-window.__MONGO_API_BASE__ = window.__MONGO_API_BASE__ || 'http://localhost:4000/api';
-// helpful debug: print where the frontend will attempt to call the API
+// Determine API base:
+// - If VITE_MONGO_API_BASE is set at build time (Netlify/Vercel), use it
+// - Else, if running locally (hostname includes 'localhost'), use local server
+// - Else, fallback to your Render URL
+const BUILD_BASE =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+    ? import.meta.env.VITE_MONGO_API_BASE
+    : null;
+
+const isLocal =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+window.__MONGO_API_BASE__ =
+  BUILD_BASE
+  || (isLocal ? 'http://localhost:4000/api' : 'https://hotel-app-backend-2gxi.onrender.com/api');
+
 try {
-  const buildBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ? import.meta.env.VITE_MONGO_API_BASE : null;
-  console.info('API base:', buildBase || window.__MONGO_API_BASE__ || '(none)');
+  console.info('API base:', window.__MONGO_API_BASE__ || '(none)');
 } catch (e) { /* ignore */ }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
