@@ -236,15 +236,15 @@ export default function LiveUpdate() {
     );
   }, [occupiedGroups, guestSearch, paymentsByStayKey]);
 
-  // Subpage render
   const sub = path.split('/').pop();
-  const renderSubpage = () => {
-    if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
-    if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
-    if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
-    if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
-    return null;
-  };
+const renderSubpage = () => {
+  if (sub === 'reservations') return <ReservationsPage data={remoteState} />;
+  if (sub === 'checkout') return <CheckoutPage data={remoteState} />;
+  if (sub === 'rentpayment') return <RentPaymentPage data={remoteState} />;
+  if (sub === 'expenses') return <ExpensesPage data={remoteState} />;
+  return null;
+};
+
 
   // Click for room (optional for future)
   const handleRoomClick = (r) => {};
@@ -252,27 +252,28 @@ export default function LiveUpdate() {
   return (
     <div className="p-4 max-w-6xl mx-auto">
       {/* Tabs with correct labels */}
-      <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
-        <div className="flex-1">
-          <div className="flex flex-wrap gap-2 mb-2">
-            <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
-            <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
-            <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
-            <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
-          </div>
-        </div>
-        {/* Root-only search controlling the Rooms grid */}
-        {isRootLiveUpdate && (
-          <div className="w-full md:w-56">
-            <input
-              value={searchRooms}
-              onChange={e => setSearchRooms(e.target.value)}
-              placeholder="Search rooms/guests"
-              className="w-full px-2 py-1 border rounded text-sm"
-            />
-          </div>
-        )}
-      </div>
+      {/* Tabs with correct labels */}
+<div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
+  <div className="flex-1">
+    <div className="flex flex-wrap gap-2 mb-2">
+      <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
+      <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
+      <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
+      <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
+    </div>
+  </div>
+  {isRootLiveUpdate && (
+    <div className="w-full md:w-56">
+      <input
+        value={searchRooms}
+        onChange={e => setSearchRooms(e.target.value)}
+        placeholder="Search rooms/guests"
+        className="w-full px-2 py-1 border rounded text-sm"
+      />
+    </div>
+  )}
+</div>
+
 
       <div className="flex flex-col md:flex-row gap-4">
         {/* LEFT: Rooms grid shown only on /liveupdate */}
