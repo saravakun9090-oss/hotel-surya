@@ -180,7 +180,6 @@ app.post('/api/state', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Add a rent payment
 app.post('/api/rent-payment', async (req, res) => {
   try {
     await ensureDb();
@@ -199,6 +198,7 @@ app.post('/api/rent-payment', async (req, res) => {
       amount: Number(body.amount) || 0,
       mode: String(body.mode || 'Cash'),
       date: body.date || new Date().toISOString().slice(0, 10),
+      checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0,10) : null, // <-- added
       createdAt: new Date().toISOString()
     };
 
@@ -209,6 +209,7 @@ app.post('/api/rent-payment', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // Add an expense
 app.post('/api/expense', async (req, res) => {

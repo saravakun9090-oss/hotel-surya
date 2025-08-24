@@ -3358,71 +3358,107 @@ function Accounts({ state }) {
     }
   };
 
-  const submitExpense = async (e) => {
-    e.preventDefault();
+  // Helper: get check-in yyyy-mm-dd for the selected group
+function findCheckInYMD(state, guestName, roomsCsv) {
+  const roomsArr = String(roomsCsv || '')
+    .split(',')
+    .map(s => Number(s.trim()))
+    .filter(Boolean)
+    .sort((a,b)=>a-b);
 
-    if (!expForm.desc || !expForm.amount) {
-      alert("Please fill all Expense fields.");
-      return;
+  // Find an occupied room that matches this guest and is part of the selected rooms
+  for (const fl of Object.values(state.floors || {})) {
+    for (const r of fl) {
+      if (r.status === 'occupied' && r.guest && roomsArr.includes(r.number)) {
+        const sameGuest = (r.guest.name || '').trim().toLowerCase() === (guestName || '').trim().toLowerCase();
+        if (sameGuest) {
+          // Prefer explicit checkInDate if present, else derive from checkIn ISO
+          if (r.guest.checkInDate) {
+            // Normalize to yyyy-mm-dd if needed
+            // If it’s dd/mm/yyyy, convert
+            const d = r.guest.checkInDate;
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
+              const [dd, mm, yyyy] = d.split('/');
+              return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+            }
+            if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+          }
+          if (r.guest.checkIn) return new Date(r.guest.checkIn).toISOString().slice(0,10);
+        }
+      }
     }
+  }
+  return null;
+}
 
-    const amountNum = Number(expForm.amount);
-    if (Number.isNaN(amountNum) || amountNum <= 0) {
-      alert("Enter a valid amount");
-      return;
-    }
+async function submitRent(e) {
+  e.preventDefault();
 
+  if (!rentForm.room || !rentForm.name || !rentForm.days || !rentForm.amount || !rentForm.mode) {
+    alert("Please fill all Rent Collection fields.");
+    return;
+  }
+
+  try {
+    const base = await getBaseFolder();
+    if (!base) return alert("Storage not connected");
+
+    setRentForm({ name: "", room: "", days: "", amount: "", mode: "Cash" });
+    setRentMsg("✅ Rent entry saved successfully.");
+    setTimeout(() => setRentMsg(""), 3000);
+
+    const today = ymd(new Date());
+    const rentDir = await ensurePath(base, ["RentCollections", today]);
+
+    // Normalize rooms as array
+    const roomsArr = rentForm.room ? rentForm.room.split(',').map(s => Number(s.trim())) : [];
+    const roomsKey = roomsArr.join('_') || String(rentForm.room || '').replace(/[^\w\-]+/g, '_');
+    const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${roomsKey || 'room'}-${Date.now()}.json`;
+
+    const rentData = {
+      ...rentForm,
+      room: roomsArr.length ? roomsArr : (isNaN(Number(rentForm.room)) ? rentForm.room : [Number(rentForm.room)]),
+      date: new Date().toISOString(),
+    };
+
+    await writeJSON(rentDir, fileName, rentData);
+    await loadTodayData();
+
+    // NEW: Mirror to backend with checkInYmd so LiveUpdate can match current stay exactly
     try {
-      const base = await getBaseFolder();
-      if (!base) {
-        alert("Storage not connected");
-        return;
-      }
+      const API_BASE =
+        window.__MONGO_API_BASE__ ||
+        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+        '/api';
 
-      setExpForm({ desc: "", amount: "" });
-      setExpMsg("✅ Expense entry saved successfully.");
-      setTimeout(() => setExpMsg(""), 3000);
-
-      const today = ymd(new Date());
-      const expDir = await ensurePath(base, ["Expenses", today]);
-
-      const safeDesc = String(expForm.desc).replace(/[^\w\-]+/g, "_");
-      const fileName = `expense-${safeDesc}-${Date.now()}.json`;
-
-      const expenseData = {
-        description: expForm.desc,
-        amount: amountNum,
-        date: new Date().toISOString(),
-      };
-
-      await writeJSON(expDir, fileName, expenseData);
-      // 🔹 Refresh today's lists instantly
-      await loadTodayData();
-
-      // NEW: Mirror to backend for LiveUpdate (safe no-op if backend not configured)
-      try {
-        const API_BASE =
-          window.__MONGO_API_BASE__ ||
-          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-          '/api';
-        await fetch(`${API_BASE}/expense`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            description: expenseData.description,
-            amount: Number(expenseData.amount) || 0,
-            // Use YYYY-MM-DD for server-side sort consistency
-            date: new Date().toISOString().slice(0, 10)
-          })
-        });
-      } catch (mirrorErr) {
-        console.warn('Remote expense mirror failed:', mirrorErr);
-      }
-    } catch (err) {
-      console.warn("Failed to save expense", err);
-      alert("Failed to save expense.");
+      const checkInYmd = findCheckInYMD(state, rentData.name, rentForm.room); // <-- derive stay key
+      await fetch(`${API_BASE}/rent-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: rentData.name,
+          room: Array.isArray(rentData.room)
+            ? rentData.room
+            : String(rentData.room || '')
+                .split(',')
+                .map(s => Number(s.trim()))
+                .filter(Boolean),
+          days: Number(rentData.days) || 0,
+          amount: Number(rentData.amount) || 0,
+          mode: rentData.mode || 'Cash',
+          date: new Date().toISOString().slice(0, 10),
+          checkInYmd // <-- include it
+        })
+      });
+    } catch (mirrorErr) {
+      console.warn('Remote rent-payment mirror failed:', mirrorErr);
     }
-  };
+  } catch (err) {
+    console.warn("Failed to save rent", err);
+    alert("Failed to save rent.");
+  }
+}
+
 
   const [todayRent, setTodayRent] = useState([]);
   const [todayExpenses, setTodayExpenses] = useState([]);

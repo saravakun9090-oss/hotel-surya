@@ -50,7 +50,7 @@ const Pill = ({ to, active, children }) => (
   </Link>
 );
 
-// Styles for new Rooms grid
+// Styles for "Rooms Today" grid
 const legendDot = (bg) => ({
   display: 'inline-block',
   width: 10,
@@ -83,9 +83,23 @@ const roomBoxStyle = (r) => {
   return { ...base, background: 'rgba(255,255,255,0.6)' };
 };
 
+// Normalize guest check-in date to yyyy-mm-dd from either ISO or dd/mm/yyyy or yyyy-mm-dd
+function normalizeCheckInYmd(guest) {
+  if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
+  if (guest?.checkInDate) {
+    const d = guest.checkInDate;
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
+      const [dd, mm, yyyy] = d.split('/');
+      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  }
+  return '';
+}
+
 export default function LiveUpdate() {
   const loc = useLocation();
-  const path = loc.pathname; // e.g., /liveupdate, /liveupdate/expenses, etc.
+  const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
@@ -119,26 +133,6 @@ export default function LiveUpdate() {
     );
   }, [allRooms, searchRooms]);
 
-  // Payments map for “Paid till now”
-  const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
-  const paymentsByGroupKey = useMemo(() => {
-    // groupKey = guestName + earliest checkIn ISO day for robustness
-    const keyOf = (guestName, checkInISO) => `${(guestName || '').trim().toLowerCase()}::${(checkInISO || '').slice(0,10)}`;
-    const sums = new Map();
-
-    // Sum by guest+day across room arrays
-    for (const p of rentPayments) {
-      const name = (p.name || '').trim();
-      // We don't have check-in date in payment; approximate by using today's ymd to avoid empty key collisions.
-      // UI purpose only; still shows meaningful "paid till now".
-      const approx = (p.date || '').slice(0,10) || '';
-      const key = keyOf(name, approx);
-      const prev = sums.get(key) || 0;
-      sums.set(key, prev + (Number(p.amount) || 0));
-    }
-    return sums;
-  }, [rentPayments]);
-
   // Group occupied by guest (multi-room booking grouped)
   const occupiedGroups = useMemo(() => {
     const map = new Map();
@@ -154,7 +148,21 @@ export default function LiveUpdate() {
     }));
   }, [allRooms]);
 
-  // Current Guests list with search and “Paid till now”
+  // Payments map for “Paid till now” keyed by guestName::checkInYmd (requires Accounts POST to send checkInYmd)
+  const paymentsByStayKey = useMemo(() => {
+    const sums = new Map();
+    const arr = remoteState?.rentPayments || remoteState?.rent_payments || [];
+    for (const p of arr) {
+      const name = (p.name || '').trim().toLowerCase();
+      const cin = (p.checkInYmd || '').slice(0, 10);
+      if (!name || !cin) continue; // skip if we can’t link to a stay
+      const key = `${name}::${cin}`;
+      sums.set(key, (sums.get(key) || 0) + (Number(p.amount) || 0));
+    }
+    return sums;
+  }, [remoteState]);
+
+  // Current Guests list with search and “Paid till now” (exact stay match)
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -189,9 +197,9 @@ export default function LiveUpdate() {
               const name = g.guest?.name || 'Guest';
               const initials =
                 (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-              // Approximate key for payments sum
-              const paidKey = `${(name || '').trim().toLowerCase()}::${(g.guest?.checkIn || '').slice(0,10)}`;
-              const paidSoFar = paymentsByGroupKey.get(paidKey) || 0;
+              const cinYmd = normalizeCheckInYmd(g.guest);
+              const paidKey = `${(name || '').trim().toLowerCase()}::${cinYmd}`;
+              const paidSoFar = paymentsByStayKey.get(paidKey) || 0;
 
               return (
                 <div key={idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 8 }}>
@@ -226,7 +234,7 @@ export default function LiveUpdate() {
         </div>
       </div>
     );
-  }, [occupiedGroups, guestSearch, paymentsByGroupKey]);
+  }, [occupiedGroups, guestSearch, paymentsByStayKey]);
 
   // Subpage render
   const sub = path.split('/').pop();
@@ -238,10 +246,8 @@ export default function LiveUpdate() {
     return null;
   };
 
-  // Click for room (optional)
-  const handleRoomClick = (r) => {
-    // reserved for future actions
-  };
+  // Click for room (optional for future)
+  const handleRoomClick = (r) => {};
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
@@ -255,7 +261,7 @@ export default function LiveUpdate() {
             <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
           </div>
         </div>
-        {/* This search filters the Rooms grid when on root; otherwise it’s hidden along with the grid */}
+        {/* Root-only search controlling the Rooms grid */}
         {isRootLiveUpdate && (
           <div className="w-full md:w-56">
             <input
@@ -269,7 +275,7 @@ export default function LiveUpdate() {
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Rooms grid only on /liveupdate */}
+        {/* LEFT: Rooms grid shown only on /liveupdate */}
         {isRootLiveUpdate && (
           <div style={{ flex: 1 }}>
             <div className="card" style={{ padding: 14, marginBottom: 12 }}>
@@ -282,7 +288,7 @@ export default function LiveUpdate() {
               </div>
 
               {Object.keys(roomsByFloor).map(floorNum => {
-                // If searching, reduce to matching rooms
+                // Apply search filter to this floor’s list if needed
                 const list = searchRooms
                   ? roomsByFloor[floorNum].filter(r =>
                       filteredRoomsForSearch.some(fr => fr.number === r.number)
@@ -321,7 +327,7 @@ export default function LiveUpdate() {
           </div>
         )}
 
-        {/* RIGHT: subpages or default current guests (on root) */}
+        {/* RIGHT: subpages or default current guests on root */}
         <div className="flex-1">
           <div className="border rounded p-3 max-h-[75vh] overflow-auto">
             {isRootLiveUpdate ? currentGuestsCard : (renderSubpage() || null)}
@@ -329,7 +335,7 @@ export default function LiveUpdate() {
         </div>
       </div>
 
-      {/* Loading / error (non-blocking) */}
+      {/* Non-blocking status */}
       {loading && <div className="text-sm text-gray-500 mt-2">Loading...</div>}
       {error && <div className="text-sm text-red-500 mt-2">{error}</div>}
     </div>
