@@ -1,14 +1,10 @@
 // src/liveupdate/ExpensesPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 
-const COLORS = { deep: '#2c3f34', cream: '#f7f5ee', muted: '#5b6a62', border: 'rgba(0,0,0,0.12)', btn: '#313e35', btnText: '#f5f7f4' };
-
-const API_BASE =
-  (typeof window !== 'undefined' && window.__MONGO_API_BASE__) ||
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-  '/api';
+const COLORS = { deep: '#2c3f34', cream: '#f7f5ee', muted: '#2c3d34ff', border: 'rgba(0,0,0,0.12)', btn: '#313e35', btnText: '#f5f7f4' };
 
 export default function ExpensesPage({ data }) {
+  // SORT: most recent first
   const base = useMemo(() => {
     const arr = (data?.expenses || []).slice();
     arr.sort((a,b)=> new Date(b.date || 0) - new Date(a.date || 0));
@@ -33,14 +29,7 @@ export default function ExpensesPage({ data }) {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      await fetch(`${API_BASE}/state`, { cache: 'no-store' });
-    } finally {
-      setTimeout(() => setLoading(false), 250);
-    }
-  };
+  const loadAll = () => { setLoading(true); setTimeout(() => setLoading(false), 300); };
 
   const clearFilters = () => { setFrom(''); setTo(''); setQ(''); setPage(1); };
 
@@ -75,26 +64,13 @@ export default function ExpensesPage({ data }) {
 
   useEffect(() => { setPage(1); }, [from, to, q]);
 
-  // Delete
-  const deleteRow = async (r) => {
-    if (!r?.id) return;
-    if (!confirm('Delete this expense?')) return;
-    setLoading(true);
-    try {
-      await fetch(`${API_BASE}/expense/${encodeURIComponent(r.id)}`, { method: 'DELETE' });
-      await fetch(`${API_BASE}/state`, { cache: 'no-store' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div>
       {/* Header */}
       <div className="header-row" style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div>
           <div className="title" style={{ fontWeight: 900, color: COLORS.deep }}>Expense Payments</div>
-          <div style={{ color: COLORS.muted, marginTop: 4 }}>View, filter, and manage expenses</div>
+          <div style={{ color: COLORS.muted, marginTop: 4 }}>View, filter, and total all expenses</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '2px' }}>
@@ -135,18 +111,14 @@ export default function ExpensesPage({ data }) {
                     <th style={{ textAlign: "left", padding: 8 }}>Date</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Description</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Amount</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.map((r, idx) => (
-                    <tr key={r.id || idx} style={{ borderBottom: "1px solid #eee" }}>
+                    <tr key={idx} style={{ borderBottom: "1px solid #eee" }}>
                       <td style={{ padding: 8 }}>{r._date}</td>
                       <td style={{ padding: 8 }}>{r._desc}</td>
                       <td style={{ padding: 8 }}>₹{r._amt}</td>
-                      <td style={{ padding: 8 }}>
-                        <button className="btn small danger" onClick={() => deleteRow(r)}>Delete</button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -165,19 +137,16 @@ export default function ExpensesPage({ data }) {
             </div>
           </>
         ) : (
-          // Cards view
+          // Cards view (mobile-compact)
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {pageRows.map((r, idx) => (
-                <div key={r.id || idx} className="card" style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 10 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
-                    <div style={{ fontWeight: 800, color: COLORS.deep, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r._desc}</div>
+                <div key={idx} className="card" style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                    <div style={{ fontWeight: 800, color: COLORS.deep, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r._desc}</div>
                     <div style={{ fontSize: 12, color: COLORS.muted }}>{r._date}</div>
                   </div>
-                  <div style={{ marginTop:6, fontWeight:900, color:COLORS.deep }}>₹{r._amt}</div>
-                  <div style={{ marginTop:8 }}>
-                    <button className="btn small danger" onClick={() => deleteRow(r)}>Delete</button>
-                  </div>
+                  <div style={{ marginTop: 6, fontWeight: 900, color: COLORS.deep }}>₹{r._amt}</div>
                 </div>
               ))}
             </div>

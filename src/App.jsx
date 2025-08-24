@@ -2755,6 +2755,169 @@ const checkInReservation = (res) => {
   );
 }
 
+// --- Backend mirror helpers for LiveUpdate sync ---
+// Reuse the same API_BASE resolution pattern used elsewhere
+const API_BASE =
+  window.__MONGO_API_BASE__ ||
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+  '/api';
+
+// Utility
+function normalizeRoomsArray(room) {
+  if (Array.isArray(room)) return room.map(Number).filter(Boolean).sort((a, b) => a - b);
+  if (room == null) return [];
+  return String(room)
+    .split(',')
+    .map(s => Number(s.trim()))
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+}
+function toYMD(dateLike) {
+  if (!dateLike) return '';
+  const s = String(dateLike);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  try {
+    return new Date(s).toISOString().slice(0, 10);
+  } catch {
+    return '';
+  }
+}
+
+// ----- RentPayments: find server row id by signature -----
+async function findServerRentRowId(signature) {
+  try {
+    const res = await fetch(`${API_BASE}/state`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    // Support either state.rentPayments or state.rent_payments shapes
+    const list = (json?.state?.rentPayments || json?.state?.rent_payments || []);
+    const sigName = String(signature.name || '').trim().toLowerCase();
+    const sigRoomsStr = JSON.stringify(normalizeRoomsArray(signature.room));
+    const sigDate = toYMD(signature.date || signature._dateFolder);
+    const sigAmount = signature.amount != null ? Number(signature.amount) : null;
+    const sigDays = signature.days != null ? Number(signature.days) : null;
+    const sigMode = String(signature.mode || '').trim().toLowerCase();
+
+    for (const r of list) {
+      const name = String(r.name || '').trim().toLowerCase();
+      const roomsStr = JSON.stringify(normalizeRoomsArray(r.room));
+      const date = toYMD(r.date);
+      const amount = r.amount != null ? Number(r.amount) : null;
+      const days = r.days != null ? Number(r.days) : null;
+      const mode = String(r.mode || '').trim().toLowerCase();
+
+      // Strict match on key fields to avoid wrong updates
+      const ok =
+        (!sigDate || date === sigDate) &&
+        (!sigName || name === sigName) &&
+        (!sigRoomsStr || roomsStr === sigRoomsStr) &&
+        (sigAmount === null || amount === sigAmount) &&
+        (sigDays === null || days === sigDays) &&
+        (!sigMode || mode === sigMode);
+
+      if (ok) return r.id || r._id || null;
+    }
+    return null;
+  } catch (e) {
+    console.warn('findServerRentRowId failed', e);
+    return null;
+  }
+}
+
+async function mirrorRentEdit(originalRow, updatedRow) {
+  try {
+    const id = await findServerRentRowId({
+      date: originalRow._dateFolder,
+      name: originalRow.name,
+      room: originalRow.room,
+      days: originalRow.days,
+      amount: originalRow.amount,
+      mode: originalRow.mode
+    });
+    if (!id) return;
+
+    await fetch(`${API_BASE}/rent-payment/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // Send only the fields that can change in your UI
+        days: Number(updatedRow.days) || 0,
+        amount: Number(updatedRow.amount) || 0,
+        mode: updatedRow.mode || 'Cash'
+      })
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('mirrorRentEdit failed', e);
+  }
+}
+
+async function mirrorRentDelete(originalRow) {
+  try {
+    const id = await findServerRentRowId({
+      date: originalRow._dateFolder,
+      name: originalRow.name,
+      room: originalRow.room,
+      days: originalRow.days,
+      amount: originalRow.amount,
+      mode: originalRow.mode
+    });
+    if (!id) return;
+
+    await fetch(`${API_BASE}/rent-payment/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('mirrorRentDelete failed', e);
+  }
+}
+
+// ----- ExpensePayments: find server expense id -----
+async function findServerExpenseId(signature) {
+  try {
+    const res = await fetch(`${API_BASE}/state`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const list = (json?.state?.expenses || []);
+    const sigDate = toYMD(signature.date || signature._dateFolder);
+    const sigDesc = String(signature.description || '').trim().toLowerCase();
+    const sigAmount = signature.amount != null ? Number(signature.amount) : null;
+
+    for (const r of list) {
+      const date = toYMD(r.date);
+      const desc = String(r.description || '').trim().toLowerCase();
+      const amt = r.amount != null ? Number(r.amount) : null;
+
+      const ok =
+        (!sigDate || date === sigDate) &&
+        (!sigDesc || desc === sigDesc) &&
+        (sigAmount === null || amt === sigAmount);
+
+      if (ok) return r.id || r._id || null;
+    }
+    return null;
+  } catch (e) {
+    console.warn('findServerExpenseId failed', e);
+    return null;
+  }
+}
+
+async function mirrorExpenseDelete(originalRow) {
+  try {
+    const id = await findServerExpenseId({
+      date: originalRow._dateFolder,
+      description: originalRow.description,
+      amount: originalRow.amount
+    });
+    if (!id) return;
+    await fetch(`${API_BASE}/expense/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('mirrorExpenseDelete failed', e);
+  }
+}
+
+
 function RentPayments() {
   const ADMIN_PASS = "1234";
   const ymd = (d = new Date()) => d.toISOString().slice(0, 10);
@@ -2868,17 +3031,21 @@ function RentPayments() {
       text: "Save changes to this rent entry?",
       onConfirm: async () => {
         try {
-          const base = await getBaseFolder();
-          const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
-          const updated = { ...row, days: Number(editDays), amount: Number(editAmount), mode: editMode };
-          await writeJSON(dir, row._fileName, updated);
-          showSuccess("✅ Entry updated successfully");
-          setEditingRow(null);
-          loadAll();
-        } catch (err) {
-          console.error(err);
-          showError("Failed to save entry");
-        }
+  const base = await getBaseFolder();
+  const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
+  const updated = { ...row, days: Number(editDays), amount: Number(editAmount), mode: editMode };
+  await writeJSON(dir, row._fileName, updated);
+
+  // Mirror to backend so LiveUpdate reflects edits
+  mirrorRentEdit(row, updated).catch(() => {});
+
+  showSuccess("✅ Entry updated successfully");
+  setEditingRow(null);
+  loadAll();
+} catch (err) {
+  console.error(err);
+  showError("Failed to save entry");
+}
       }
     });
   }
@@ -2886,15 +3053,19 @@ function RentPayments() {
 
   async function deleteEntry(row) {
     try {
-      const base = await getBaseFolder();
-      const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
-      await dir.removeEntry(row._fileName);
-      showSuccess("🗑 Entry deleted successfully");
-      loadAll();
-    } catch (err) {
-      console.error(err);
-      showError("Failed to delete entry");
-    }
+  const base = await getBaseFolder();
+  const dir = await ensurePath(base, ["RentCollections", row._dateFolder]);
+  await dir.removeEntry(row._fileName);
+
+  // Mirror delete to backend so LiveUpdate reflects deletions
+  mirrorRentDelete(row).catch(() => {});
+
+  showSuccess("🗑 Entry deleted successfully");
+  loadAll();
+} catch (err) {
+  console.error(err);
+  showError("Failed to delete entry");
+}
   }
 
   // Popup helpers
@@ -3156,17 +3327,22 @@ function ExpensePayments() {
   function handlePasswordCancel() { setAskPass(false); }
 
   async function performDelete() {
-    try {
-      const base = await getBaseFolder();
-      const dir = await ensurePath(base, ["Expenses", pendingRow._dateFolder]);
-      await dir.removeEntry(pendingRow._fileName);
-      showSuccess("🗑 Expense deleted successfully");
-      loadAll();
-    } catch (err) {
-      console.error(err);
-      showError("❌ Failed to delete expense");
-    }
+  try {
+    const base = await getBaseFolder();
+    const dir = await ensurePath(base, ["Expenses", pendingRow._dateFolder]);
+    await dir.removeEntry(pendingRow._fileName);
+
+    // Mirror delete to backend so LiveUpdate reflects deletions
+    mirrorExpenseDelete(pendingRow).catch(() => {});
+
+    showSuccess("🗑 Expense deleted successfully");
+    loadAll();
+  } catch (err) {
+    console.error(err);
+    showError("❌ Failed to delete expense");
   }
+}
+
 
   // Toast helpers
   function showSuccess(msg) { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(""), 2500); }
