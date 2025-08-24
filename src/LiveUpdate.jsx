@@ -10,6 +10,14 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
   ? import.meta.env.VITE_MONGO_API_BASE
   : (window.__MONGO_API_BASE__ || '/api');
 
+// Theme tokens
+const COLORS = {
+  deep: '#2c3f34',
+  cream: '#f0eee1',
+  muted: '#6b7a72',
+  border: 'rgba(0,0,0,0.12)'
+};
+
 function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -45,8 +53,13 @@ function usePolling(url, interval = 2500) {
 const Pill = ({ to, active, children }) => (
   <Link
     to={to}
-    className={`px-3 py-2 rounded-md text-sm whitespace-nowrap ${active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}
-    style={{ boxShadow: active ? '0 2px 6px rgba(0,0,0,0.12)' : 'none' }}
+    className="px-3 py-2 rounded-md text-sm whitespace-nowrap"
+    style={{
+      color: active ? COLORS.cream : COLORS.deep,
+      background: active ? COLORS.deep : COLORS.cream,
+      border: `1px solid ${COLORS.border}`,
+      boxShadow: active ? '0 2px 6px rgba(0,0,0,0.12)' : 'none'
+    }}
   >
     {children}
   </Link>
@@ -64,25 +77,25 @@ const legendDot = (bg) => ({
   border: '1px solid rgba(0,0,0,0.08)'
 });
 
-// Room box style (bug-fixed: stronger contrast for "free", consistent border, grid-safe min width)
+// Room box style (bug-fixed)
 const roomBoxStyle = (r) => {
   const base = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
-    minWidth: 64,
+    minHeight: 56,
+    minWidth: 72,
     borderRadius: 10,
     fontWeight: 800,
     cursor: 'pointer',
-    border: '1px solid rgba(0,0,0,0.12)',
+    border: `1px solid ${COLORS.border}`,
     userSelect: 'none',
     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-    color: '#0b3d2e'
+    color: COLORS.deep
   };
-  if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.65)' };
-  if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.7)' };
-  return { ...base, background: 'rgba(248, 250, 252, 0.9)' }; // light “free” tile
+  if (r.status === 'reserved') return { ...base, background: 'rgba(255, 213, 128, 0.7)' };
+  if (r.status === 'occupied') return { ...base, background: 'rgba(139, 224, 164, 0.75)' };
+  return { ...base, background: COLORS.cream };
 };
 
 // Normalize check-in date to yyyy-mm-dd
@@ -104,7 +117,7 @@ export default function LiveUpdate() {
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // IMPORTANT: search moved into Current Guests (removed top-right search)
+  // Search moved into Current Guests
   const [guestSearch, setGuestSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -124,7 +137,7 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
-  // Group occupied by guest (multi-room booking grouped)
+  // Group occupied by guest
   const occupiedGroups = useMemo(() => {
     const map = new Map();
     for (const r of allRooms) {
@@ -152,7 +165,7 @@ export default function LiveUpdate() {
     return sums;
   }, [rentPayments]);
 
-  // Current Guests list (with search inside this card)
+  // Current Guests list
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -170,26 +183,26 @@ export default function LiveUpdate() {
           marginTop: 16,
           borderRadius: 12,
           boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-          background: 'var(--card-bg, #fff)'
+          background: COLORS.cream,
+          border: `1px solid ${COLORS.border}`
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Current Guests</div>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>{occupiedGroups.length} occupied</div>
+          <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.deep }}>Current Guests</div>
+          <div style={{ fontSize: 13, color: COLORS.muted }}>{occupiedGroups.length} occupied</div>
         </div>
 
-        {/* Search moved here */}
         <div style={{ marginBottom: 10 }}>
           <input
             className="input"
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.1)' }}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1px solid ${COLORS.border}`, background: '#fff' }}
             placeholder="Search guest or room..."
             value={guestSearch}
             onChange={(e) => setGuestSearch(e.target.value)}
           />
         </div>
 
-        {occupiedGroups.length === 0 && <div style={{ color: 'var(--muted)' }}>No rooms are occupied</div>}
+        {occupiedGroups.length === 0 && <div style={{ color: COLORS.muted }}>No rooms are occupied</div>}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
@@ -211,27 +224,28 @@ export default function LiveUpdate() {
                     alignItems: 'center',
                     padding: 10,
                     borderRadius: 12,
-                    border: '1px solid rgba(0,0,0,0.06)'
+                    border: `1px solid ${COLORS.border}`,
+                    background: '#fff'
                   }}
                 >
                   <div style={{
-                    width: 44, height: 44, borderRadius: 10, background: 'rgba(0,0,0,0.06)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14
+                    width: 44, height: 44, borderRadius: 10, background: COLORS.cream,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14, color: COLORS.deep
                   }}>
                     {initials}
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
                         {name}
                       </div>
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      <div style={{ fontSize: 12, color: COLORS.muted }}>
                         Room {(g.rooms || []).join(', ')}
                       </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
                       <div>Phone no: {g.guest?.contact || '—'}</div>
                       <div>Price: ₹{g.guest?.rate || 0}/day</div>
                       <div>In: {g.guest?.checkInDate || (g.guest?.checkIn ? new Date(g.guest.checkIn).toLocaleDateString() : '—')} {g.guest?.checkInTime || ''}</div>
@@ -249,40 +263,48 @@ export default function LiveUpdate() {
 
   const sub = path.split('/').pop();
 
-  // Subpage wrapper to add Back button on each subpage
-  const BackButton = () => (
-    <div style={{ marginBottom: 10 }}>
-      <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+  // Back button shell for subpages
+  const SubpageShell = ({ children }) => (
+    <div>
+      <div style={{ marginBottom: 10 }}>
+        <button
+          className="btn ghost"
+          onClick={() => navigate('/liveupdate')}
+          style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}
+        >
+          ← Back
+        </button>
+      </div>
+      {children}
     </div>
   );
 
   const renderSubpage = () => {
-    if (sub === 'reservations') return (<><BackButton /><ReservationsPage data={remoteState} /></>);
-    if (sub === 'checkout') return (<><BackButton /><CheckoutPage data={remoteState} /></>);
-    if (sub === 'rentpayment') return (<><BackButton /><RentPaymentPage data={remoteState} /></>);
-    if (sub === 'expenses') return (<><BackButton /><ExpensesPage data={remoteState} /></>);
+    if (sub === 'reservations') return <SubpageShell><ReservationsPage data={remoteState} /></SubpageShell>;
+    if (sub === 'checkout') return <SubpageShell><CheckoutPage data={remoteState} /></SubpageShell>;
+    if (sub === 'rentpayment') return <SubpageShell><RentPaymentPage data={remoteState} /></SubpageShell>;
+    if (sub === 'expenses') return <SubpageShell><ExpensesPage data={remoteState} /></SubpageShell>;
     return null;
   };
 
-  const handleRoomClick = (r) => {};
-
   return (
-    <div className="p-3 md:p-4 max-w-7xl mx-auto">
-      {/* Tabs with correct labels (kept across pages). Scrolling on mobile */}
-      <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
-        <div className="flex-1">
-          <div className="flex gap-2 mb-2" style={{ overflowX: 'auto', paddingBottom: 2 }}>
-            <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
-            <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
-            <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
-            <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
+    <div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
+      {/* Tab pills: show ONLY on /liveupdate */}
+      {isRootLiveUpdate && (
+        <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
+          <div className="flex-1">
+            <div className="flex gap-2 mb-2" style={{ overflowX: 'auto', paddingBottom: 2 }}>
+              <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
+              <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
+              <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
+              <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
+            </div>
           </div>
         </div>
-        {/* Removed top-right search; it now lives in Current Guests card */}
-      </div>
+      )}
 
       <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Rooms grid only on /liveupdate (hidden entirely on subpages) */}
+        {/* LEFT: Rooms grid only on /liveupdate */}
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
             <div
@@ -291,28 +313,28 @@ export default function LiveUpdate() {
                 padding: 16,
                 marginBottom: 12,
                 borderRadius: 12,
-                background: 'var(--card-bg, #fff)',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.06)'
+                background: COLORS.cream,
+                boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
+                border: `1px solid ${COLORS.border}`
               }}
             >
-              <div style={{ fontWeight: 900, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
+              <div style={{ fontWeight: 900, marginBottom: 10, color: COLORS.deep }}>Rooms Today</div>
 
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8, flexWrap: 'wrap' }}>
-                <div><span style={legendDot('rgba(248, 250, 252, 0.9)')} /> Free</div>
+              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: COLORS.muted, marginBottom: 8, flexWrap: 'wrap' }}>
+                <div><span style={legendDot(COLORS.cream)} /> Free</div>
                 <div><span style={legendDot('rgba(255, 213, 128, 0.7)')} /> Reserved</div>
-                <div><span style={legendDot('rgba(139, 224, 164, 0.7)')} /> Occupied</div>
+                <div><span style={legendDot('rgba(139, 224, 164, 0.75)')} /> Occupied</div>
               </div>
 
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
 
-                // Fluid grid: auto fill with min 70px tiles
-                const gridCols = 'repeat(auto-fill, minmax(70px, 1fr))';
+                const gridCols = 'repeat(auto-fill, minmax(72px, 1fr))';
 
                 return (
                   <div key={floorNum} style={{ marginBottom: 14 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: COLORS.muted, marginBottom: 8 }}>
                       Floor {floorNum}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 10 }}>
@@ -327,7 +349,6 @@ export default function LiveUpdate() {
                               ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
                               : 'Free'
                           }
-                          onClick={() => handleRoomClick(r)}
                         >
                           {r.number}
                         </div>
@@ -340,19 +361,24 @@ export default function LiveUpdate() {
           </div>
         )}
 
-        {/* RIGHT: subpages or default current guests (on root) */}
+        {/* RIGHT: subpages or default current guests */}
         <div className="flex-1">
           <div
             className="border rounded p-3 md:p-4"
-            style={{ borderColor: 'rgba(0,0,0,0.1)', background: 'var(--card-bg, #fff)', borderRadius: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.05)' }}
+            style={{
+              borderColor: COLORS.border,
+              background: '#fff',
+              borderRadius: 12,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.05)'
+            }}
           >
             {isRootLiveUpdate ? currentGuestsCard : (renderSubpage() || null)}
           </div>
         </div>
       </div>
 
-      {loading && <div className="text-sm text-gray-500 mt-2">Loading...</div>}
-      {error && <div className="text-sm text-red-500 mt-2">{error}</div>}
+      {loading && <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>Loading...</div>}
+      {error && <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

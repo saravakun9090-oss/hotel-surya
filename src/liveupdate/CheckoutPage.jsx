@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-
+const COLORS = { deep: '#2c3f34', cream: '#f0eee1', muted: '#6b7a72', border: 'rgba(0,0,0,0.12)' };
 
 export default function CheckoutPage({ data }) {
   const navigate = useNavigate();
@@ -27,7 +27,6 @@ export default function CheckoutPage({ data }) {
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-
     return all.filter((c) => {
       if (q) {
         const name = (c.name || c.guest?.name || '').toLowerCase();
@@ -37,7 +36,6 @@ export default function CheckoutPage({ data }) {
         const hay = [name, roomStr, phone, dates].join(' ');
         if (!hay.includes(q)) return false;
       }
-
       const coYmd = ymdFromDisplay(c.checkOutDate) || ymdFromDisplay(c.checkInDate);
       if (filterDateFrom && coYmd && coYmd < filterDateFrom) return false;
       if (filterDateTo && coYmd && coYmd > filterDateTo) return false;
@@ -51,11 +49,17 @@ export default function CheckoutPage({ data }) {
   }, [all, searchQuery, filterDateFrom, filterDateTo, filterPayment]);
 
   return (
-    
     <div>
       <div style={{ marginBottom: 10 }}>
-        <button className="btn ghost" onClick={() => navigate('/liveupdate')}>← Back</button>
+        <button
+          className="btn ghost"
+          onClick={() => navigate('/liveupdate')}
+          style={{ color: COLORS.deep, border: `1px solid ${COLORS.border}`, background: COLORS.cream }}
+        >
+          ← Back
+        </button>
       </div>
+
       {/* Filters/Header */}
       <div
         className="card"
@@ -66,12 +70,13 @@ export default function CheckoutPage({ data }) {
           alignItems: "center",
           gap: 10,
           flexWrap: "wrap",
-          background: "var(--card-bg, #fff)",
+          background: COLORS.cream,
           borderRadius: 12,
-          boxShadow: "0 2px 10px rgba(0,0,0,0.06)"
+          boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+          border: `1px solid ${COLORS.border}`
         }}
       >
-        <div style={{ fontWeight: 900, color: "var(--deep, #0b3d2e)", fontSize: 18 }}>
+        <div style={{ fontWeight: 900, color: COLORS.deep, fontSize: 18 }}>
           Checked-Out Guests
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -82,54 +87,34 @@ export default function CheckoutPage({ data }) {
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.12)",
+              border: `1px solid ${COLORS.border}`,
               borderRadius: 10,
-              minWidth: 200
+              minWidth: 200,
+              background: '#fff',
+              color: COLORS.deep
             }}
           />
-          <input
-            type="date"
-            value={filterDateFrom}
-            onChange={(e) => setFilterDateFrom(e.target.value)}
-            style={{
-              padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 10
-            }}
-          />
-          <input
-            type="date"
-            value={filterDateTo}
-            onChange={(e) => setFilterDateTo(e.target.value)}
-            style={{
-              padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 10
-            }}
-          />
+          <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)}
+            style={{ padding: "10px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 10, background: '#fff', color: COLORS.deep }} />
+          <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
+            style={{ padding: "10px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 10, background: '#fff', color: COLORS.deep }} />
           <select
             value={filterPayment}
             onChange={(e) => setFilterPayment(e.target.value)}
             style={{
               padding: "10px 12px",
-              border: "1px solid rgba(0,0,0,0.12)",
+              border: `1px solid ${COLORS.border}`,
               borderRadius: 10,
-              minWidth: 160
+              minWidth: 160,
+              background: '#fff',
+              color: COLORS.deep
             }}
           >
             <option value="all">All payments</option>
             <option value="tallied">Tallied ✅</option>
             <option value="not-tallied">Not tallied ❌</option>
           </select>
-          <button
-            className="btn ghost"
-            onClick={() => {
-              setSearchQuery("");
-              setFilterDateFrom("");
-              setFilterDateTo("");
-              setFilterPayment("all");
-            }}
-          >
+          <button className="btn ghost" onClick={() => { setSearchQuery(""); setFilterDateFrom(""); setFilterDateTo(""); setFilterPayment("all"); }}>
             Clear
           </button>
         </div>
@@ -138,24 +123,24 @@ export default function CheckoutPage({ data }) {
       {/* List */}
       <div className="list" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {filtered.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>No checkouts found</div>
+          <div style={{ color: COLORS.muted }}>No checkouts found</div>
         ) : (
           filtered.map((c, i) => {
             const name = c.name || c.guest?.name || 'Guest';
             const roomStr = Array.isArray(c.room) ? c.room.join(', ') : (c.room || c.rooms || '—');
             return (
-              <div key={i} className="card" style={{ padding: 12, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-                <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div key={i} className="card" style={{ padding: 12, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: `1px solid ${COLORS.border}`, background: '#fff' }}>
+                <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
                   {name}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                <div style={{ fontSize: 12, color: COLORS.muted }}>
                   Room {roomStr}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: COLORS.muted, marginTop: 2 }}>
                   Phone no: {c.contact || '—'}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
                   <div>Check-In: {c.checkInDate} {c.checkInTime}</div>
                   <div>Check-Out: {c.checkOutDate} {c.checkOutTime}</div>
                   <div>Days Stayed: {c.daysStayed}</div>
