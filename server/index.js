@@ -14,7 +14,7 @@ app.use(express.json());
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME || 'hotel_surya';
-// Pick ONE and keep consistent across repo: 'state' or 'app_state'
+// Keep consistent across repo: 'state' or 'app_state'
 const COLLECTION = process.env.COLLECTION || 'state';
 const PORT = process.env.PORT || 4000;
 
@@ -134,6 +134,7 @@ app.get('/api/download/:id', async (req, res) => {
   }
 });
 
+// Return combined state
 app.get('/api/state', async (req, res) => {
   try {
     await ensureDb();
@@ -165,6 +166,7 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
+// Save base app state snapshot
 app.post('/api/state', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(503).json({ ok: false, msg: 'mongo not initialized' });
@@ -176,6 +178,77 @@ app.post('/api/state', async (req, res) => {
     { upsert: true }
   );
   res.json({ ok: true });
+});
+
+// Add a rent payment
+app.post('/api/rent-payment', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const body = req.body || {};
+    const doc = {
+      name: String(body.name || '').trim(),
+      room: Array.isArray(body.room)
+        ? body.room.map(Number)
+        : String(body.room || '')
+            .split(',')
+            .map(s => Number(s.trim()))
+            .filter(Boolean),
+      days: Number(body.days) || null,
+      amount: Number(body.amount) || 0,
+      mode: String(body.mode || 'Cash'),
+      date: body.date || new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString()
+    };
+
+    await rentPaymentsCol.insertOne(doc);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/rent-payment failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Add an expense
+app.post('/api/expense', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const body = req.body || {};
+    const doc = {
+      description: String(body.description || '').trim(),
+      amount: Number(body.amount) || 0,
+      date: body.date || new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString()
+    };
+
+    await expensesCol.insertOne(doc);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/expense failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Optional: record a checkout for LiveUpdate
+app.post('/api/checkout', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkoutsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const body = req.body || {};
+    const doc = {
+      ...body,
+      createdAt: new Date().toISOString()
+    };
+    await checkoutsCol.insertOne(doc);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/checkout failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 (async () => {
