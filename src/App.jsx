@@ -1297,68 +1297,89 @@ setRefreshKey(k => k + 1);
   };
 
   const submit = async (e) => {
-    e.preventDefault();
-  if (!form.room) return alert("Select a room");
-  if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
+e.preventDefault();
+if (!form.room) return alert("Select a room");
+if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
 
-    const now = new Date();
-    const checkInDate = now.toLocaleDateString();
-    const checkInTime = now.toLocaleTimeString();
+const now = new Date();
+const checkInDate = now.toLocaleDateString();
+const checkInTime = now.toLocaleTimeString();
 
-    setSuccessMsg(`Room ${form.room} reserved successfully`);
-    setForm({ name: "", contact: "", room: "", rate: "" });
-    setSelectedRoom(null);
-    setScanFile(null);
-    setTimeout(() => setSuccessMsg(""), 3000);
+setSuccessMsg(`Room ${form.room} reserved successfully`);
+setForm({ name: "", contact: "", room: "", rate: "" });
+setSelectedRoom(null);
+setScanFile(null);
+setTimeout(() => setSuccessMsg(""), 3000);
 
-    const newState = { ...state, floors: { ...state.floors } };
-    const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
-    Object.keys(newState.floors).forEach(fnum => {
-      newState.floors[fnum] = newState.floors[fnum].map(r =>
-        roomsToOccupy.includes(r.number)
-          ? {
-              ...r,
-              status: "occupied",
-              guest: {
-                name: form.name,
-                contact: form.contact,
-                checkIn: now.toISOString(),
-                checkInDate,    // ✅ human-readable
-                checkInTime,    // ✅ human-readable
-                rate: Number(form.rate) || 0
-              }
-            }
-          : r
-      );
-    });
+const newState = { ...state, floors: { ...state.floors } };
+const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
+Object.keys(newState.floors).forEach(fnum => {
+newState.floors[fnum] = newState.floors[fnum].map(r =>
+roomsToOccupy.includes(r.number)
+? {
+...r,
+status: "occupied",
+guest: {
+name: form.name,
+contact: form.contact,
+checkIn: now.toISOString(),
+checkInDate,
+checkInTime,
+rate: Number(form.rate) || 0
+}
+}
+: r
+);
+});
 
-    // Remove matching reservations for any of the rooms checked-in
-    const roomsSet = new Set(roomsToOccupy.map(Number));
-    const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
-    if (reservationMatches.length) {
-      newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
-      for (const rm of reservationMatches) {
-        await deleteReservationFile(rm.date, rm.room, rm.name);
-      }
-    }
+// Remove matching reservations for any of the rooms checked-in
+const roomsSet = new Set(roomsToOccupy.map(Number));
+const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
+if (reservationMatches.length) {
+newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
+for (const rm of reservationMatches) {
+await deleteReservationFile(rm.date, rm.room, rm.name);
+}
+}
 
-    setState(newState);
-    saveState(newState);
+setState(newState);
+saveState(newState);
 
-    await saveCheckinData({
-      name: form.name,
-      contact: form.contact,
-      room: roomsToOccupy,
-      checkIn: now.toISOString(),
-      checkInDate,
-      checkInTime,
-      rate: Number(form.rate) || 0
-    });
+await saveCheckinData({
+name: form.name,
+contact: form.contact,
+room: roomsToOccupy,
+checkIn: now.toISOString(),
+checkInDate,
+checkInTime,
+rate: Number(form.rate) || 0
+});
 
-    
-  // refresh the grouped view so Current Guests updates immediately
-  setRefreshKey(k => k + 1);
-  };
+// MIRROR: check-in event
+try {
+const API_BASE =
+window.MONGO_API_BASE ||
+(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+'/api';
+await fetch(`${API_BASE}/checkin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: form.name || 'Guest',
+    contact: form.contact || '',
+    room: roomsToOccupy,
+    rate: Number(form.rate) || 0,
+    checkInDate,
+    checkInTime,
+    checkInDateTime: now.toISOString()
+  })
+}).catch(() => {});
+} catch (err) {
+// ignore mirror failures
+}
+
+setRefreshKey(k => k + 1);
+};
 
   const legendDot = (bg) => ({
     display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
@@ -2638,34 +2659,50 @@ function Reservations({ state, setState }) {
   };
 
   // Add new reservation
-  const addReservation = (e) => {
-    e.preventDefault();
-    if (!form.name || !form.place || !form.room || !form.date) {
-      return alert('Please fill all fields');
-    }
+  const addReservation = async (e) => {
+e.preventDefault();
+if (!form.name || !form.place || !form.room || !form.date) {
+return alert('Please fill all fields');
+}
 
-    // ✅ Create the reservation object once
-    const resObj = {
-      name: form.name,
-      place: form.place,
-      room: Number(form.room),
-      date: form.date,
-    };
+const resObj = {
+name: form.name,
+place: form.place,
+room: Number(form.room),
+date: form.date,
+};
 
-    // Push to new state
-    const newState = { ...state };
-    if (!newState.reservations) newState.reservations = [];
-    newState.reservations.push(resObj);
+const newState = { ...state };
+if (!newState.reservations) newState.reservations = [];
+newState.reservations.push(resObj);
 
-    setForm({ name: '', place: '', room: '', date: '' });
+setForm({ name: '', place: '', room: '', date: '' });
 
-    // Update React state + browser localStorage
-    setState(newState);
-    saveState(newState);
+setState(newState);
+saveState(newState);
 
-    // ✅ Save the same reservation object to disk
-    persistReservation(resObj);
-  };
+persistReservation(resObj);
+
+// MIRROR: reservation event (non-blocking)
+try {
+const API_BASE =
+window.MONGO_API_BASE ||
+(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+'/api';
+await fetch(`${API_BASE}/reservation`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: resObj.name,
+    place: resObj.place || '',
+    room: Number(resObj.room),
+    date: resObj.date
+  })
+}).catch(() => {});
+} catch (_) {
+// ignore mirror failures
+}
+};
 
   // Delete reservation with confirmation + disk removal
   const deleteReservation = async (i) => {
