@@ -1018,6 +1018,11 @@ function CheckIn({ state, setState, locationState }) {
     };
   }, [scanFile]);
 
+const groupKey = (group) => {
+const name = String(group?.guest?.name || "").toLowerCase();
+const cin = String(group?.guest?.checkIn || "").slice(0, 10);
+return `${name}::${cin}`;
+};
   
 
   return (
