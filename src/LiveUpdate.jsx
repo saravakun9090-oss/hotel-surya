@@ -9,9 +9,9 @@ import ExpensesPage from './liveupdate/ExpensesPage';
 
 // Resolve API base the same way other modules do
 const API_BASE =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
-    ? import.meta.env.VITE_MONGO_API_BASE
-    : (window.MONGO_API_BASE || '/api');
+(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+? import.meta.env.VITE_MONGO_API_BASE
+: (window.MONGO_API_BASE || null);
 
 const COLORS = {
   deep: '#2c3f34',
