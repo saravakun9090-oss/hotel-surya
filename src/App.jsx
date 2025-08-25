@@ -471,7 +471,6 @@ function CheckIn({ state, setState, locationState }) {
   const ymd = (d = new Date()) => d.toISOString().slice(0, 10);
   const location = useLocation();
   const navigate = useNavigate();
-
   const todayISO = ymd();
 
   const [form, setForm] = useState({ name: "", contact: "", room: [], rate: "" });
@@ -494,29 +493,22 @@ function CheckIn({ state, setState, locationState }) {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [conflictMsg, setConflictMsg] = useState(null);
   const [guestSearch, setGuestSearch] = useState("");
-  const [scannedMap, setScannedMap] = useState({});
-  const [paymentsMap, setPaymentsMap] = useState({});
+  const [scannedMap, setScannedMap] = useState({}); // key -> boolean
+  const [paymentsMap, setPaymentsMap] = useState({}); // key -> number
   const [refreshKey, setRefreshKey] = useState(0);
-
+  
   const nameFocusedRef = useRef(false);
   const searchTimeoutRef = useRef(null);
-
-  // Resolve API base once for event mirror
-  const API_BASE =
-    window.MONGO_API_BASE ||
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-    '/api';
 
   useEffect(() => {
     if (location.state?.prefName || location.state?.prefRoom) {
       setForm(f => ({
         ...f,
         name: location.state.prefName || f.name,
-        room: location.state.prefRoom
-          ? (Array.isArray(location.state.prefRoom) ? location.state.prefRoom : [location.state.prefRoom])
-          : f.room
+        room: location.state.prefRoom ? (Array.isArray(location.state.prefRoom) ? location.state.prefRoom : [location.state.prefRoom]) : f.room
       }));
       setSelectedRoom(location.state.prefRoom || null);
+
       if (location.state.prefName && location.state.prefName.length >= 2) {
         nameFocusedRef.current = true;
         searchGuestMatches(location.state.prefName);
@@ -524,44 +516,45 @@ function CheckIn({ state, setState, locationState }) {
     }
   }, [location.state]);
 
-  // Build room grid (local view)
+  // Build room grid
   const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
   const roomsByFloor = {};
   Object.keys(state.floors).forEach(floorNum => {
     roomsByFloor[floorNum] = state.floors[floorNum].map(r => {
-      const res = reservationsToday.find(rr => Number(rr.room) === Number(r.number));
+      const res = reservationsToday.find(rr => rr.room === r.number);
       if (res && r.status === "free") return { ...r, status: "reserved", reservedFor: res };
       return r;
     });
   });
 
-  // Group occupied rooms locally
   useEffect(() => {
-    (async () => {
-      const map = new Map();
-      for (const arr of Object.values(state.floors)) {
-        for (const r of arr) {
-          if (r.status === "occupied" && r.guest) {
-            let guestData = { ...r.guest };
-            if (!guestData.rate) {
-              const checkInDate = (guestData.checkIn || "").slice(0, 10) || ymd(new Date());
-              const fetchedRate = await fetchRateFromCheckin(r.number, guestData.name, checkInDate);
-              guestData.rate = fetchedRate;
-            }
-            const key = `${guestData.name}::${guestData.checkIn || ''}`;
-            if (!map.has(key)) map.set(key, { guest: guestData, rooms: [] });
-            map.get(key).rooms.push(r.number);
+  (async () => {
+    // Group occupied rooms by guest (name + checkIn) so multi-room bookings appear as one entry
+    const map = new Map();
+    for (const arr of Object.values(state.floors)) {
+      for (const r of arr) {
+        if (r.status === "occupied" && r.guest) {
+          let guestData = { ...r.guest };
+          if (!guestData.rate) {
+            const checkInDate = (guestData.checkIn || "").slice(0, 10) || ymd(new Date());
+            const fetchedRate = await fetchRateFromCheckin(r.number, guestData.name, checkInDate);
+            guestData.rate = fetchedRate;
           }
+          const key = `${guestData.name}::${guestData.checkIn || ''}`;
+          if (!map.has(key)) map.set(key, { guest: guestData, rooms: [] });
+          map.get(key).rooms.push(r.number);
         }
       }
-      const grouped = Array.from(map.values()).map(g => ({
-        guest: g.guest,
-        rooms: g.rooms.sort((a, b) => a - b)
-      }));
-      setOccupiedRooms(grouped);
-    })();
-  }, [state.floors, refreshKey]);
+    }
+    const grouped = Array.from(map.values()).map(g => ({
+      guest: g.guest,
+      rooms: g.rooms.sort((a,b)=>a-b)
+    }));
+    setOccupiedRooms(grouped);
+  })();
+}, [state.floors, refreshKey]);
 
+  // Open the edit modal for a grouped guest
   const openEditModal = (group) => {
     setEditGuest(group);
     setEditNameInput(group.guest?.name || "");
@@ -570,143 +563,543 @@ function CheckIn({ state, setState, locationState }) {
     setShowEditModal(true);
   };
 
-  // Save edits (local/disk only)
+  // Save edits: update in-memory state, localStorage, and persist to Checkins JSON on disk
   async function saveEditChanges() {
-    if (!editGuest) return;
-    const origRooms = (editGuest.rooms || []).map(Number);
-    const parsed = String(editRoomsInput || "").split(",").map(s => Number(s.trim())).filter(Boolean);
-    if (parsed.length === 0) return alert("Please provide at least one room");
+if (!editGuest) return;
+const origRooms = (editGuest.rooms || []).map(Number); 
+// parse rooms input
+const parsed = String(editRoomsInput || "")
+.split(",")
+.map(s => Number(s.trim()))
+.filter(Boolean);
+if (parsed.length === 0) return alert("Please provide at least one room");
 
-    const newRooms = parsed;
+// check for conflicts: any newly requested room occupied by someone else
+const newRooms = parsed;
+const occupiedByOthers = [];
+for (const floorArr of Object.values(state.floors)) {
+for (const r of floorArr) {
+if (newRooms.includes(r.number)) {
+// allow if it's part of original group
+if (!origRooms.includes(r.number) && r.status === "occupied") {
+occupiedByOthers.push(r.number);
+}
+}
+}
+}
+if (occupiedByOthers.length) {
+setConflictMsg("Rooms already occupied: " + occupiedByOthers.join(", "));
+return;
+}
 
-    const occupiedByOthers = [];
-    for (const floorArr of Object.values(state.floors)) {
-      for (const r of floorArr) {
-        if (newRooms.includes(r.number)) {
-          if (!origRooms.includes(r.number) && r.status === "occupied") {
-            occupiedByOthers.push(r.number);
-          }
-        }
-      }
-    }
-    if (occupiedByOthers.length) {
-      setConflictMsg("Rooms already occupied: " + occupiedByOthers.join(", "));
-      return;
-    }
+const newState = { ...state, floors: { ...state.floors } };
 
-    const newState = { ...state, floors: { ...state.floors } };
+// free original rooms (unless they are also in newRooms)
+Object.keys(newState.floors).forEach(fnum => {
+newState.floors[fnum] = newState.floors[fnum].map(r => {
+if (origRooms.includes(r.number) && !newRooms.includes(r.number)) {
+return { ...r, status: "free", guest: null };
+}
+return r;
+});
+});
 
-    Object.keys(newState.floors).forEach(fnum => {
-      newState.floors[fnum] = newState.floors[fnum].map(r => {
-        if (origRooms.includes(r.number) && !newRooms.includes(r.number)) {
-          return { ...r, status: "free", guest: null };
-        }
-        return r;
-      });
-    });
+// occupy new rooms with updated guest info
+const updatedGuest = {
+...editGuest.guest,
+name: editNameInput,
+rate: Number(editRateInput) || 0,
+edited: true
+};
 
-    const updatedGuest = {
-      ...editGuest.guest,
-      name: editNameInput,
-      rate: Number(editRateInput) || 0,
-      edited: true
-    };
+Object.keys(newState.floors).forEach(fnum => {
+newState.floors[fnum] = newState.floors[fnum].map(r => {
+if (newRooms.includes(r.number)) {
+return {
+...r,
+status: "occupied",
+guest: {
+...updatedGuest,
+checkIn: r.guest?.checkIn || editGuest.guest?.checkIn,
+checkInDate: editGuest.guest?.checkInDate,
+checkInTime: editGuest.guest?.checkInTime
+}
+};
+}
+return r;
+});
+});
 
-    Object.keys(newState.floors).forEach(fnum => {
-      newState.floors[fnum] = newState.floors[fnum].map(r => {
-        if (newRooms.includes(r.number)) {
-          return {
-            ...r,
-            status: "occupied",
-            guest: {
-              ...updatedGuest,
-              checkIn: r.guest?.checkIn || editGuest.guest?.checkIn,
-              checkInDate: editGuest.guest?.checkInDate,
-              checkInTime: editGuest.guest?.checkInTime
-            }
-          };
-        }
-        return r;
-      });
-    });
+// Update app state and persist to localStorage first
+setState(newState);
+saveState(newState);
 
-    setState(newState);
-    saveState(newState);
-
+// Then attempt to update the on-disk checkin JSON file for this booking (if storage connected)
+try {
+const base = await getBaseFolder();
+if (base) {
+const checkInISO =
+(editGuest.guest?.checkIn || "").slice(0, 10) || ymd(new Date()); 
+const checkinDir = await ensurePath(base, ["Checkins", checkInISO]);
+let foundOld = null;
+  for await (const [entryName, entryHandle] of checkinDir.entries()) {
+    if (entryHandle.kind !== "file" || !entryName.endsWith(".json")) continue;
     try {
-      const base = await getBaseFolder();
-      if (base) {
-        const checkInISO = (editGuest.guest?.checkIn || "").slice(0, 10) || ymd(new Date());
-        const checkinDir = await ensurePath(base, ["Checkins", checkInISO]);
-        let foundOld = null;
-        for await (const [entryName, entryHandle] of checkinDir.entries()) {
-          if (entryHandle.kind !== "file" || !entryName.endsWith(".json")) continue;
-          try {
-            const f = await entryHandle.getFile();
-            const data = JSON.parse(await f.text());
-            const dataName = String(data.name || "").trim().toLowerCase();
-            const origName = String(editGuest.guest?.name || "").trim().toLowerCase();
-            const dataRooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
-            if (dataName === origName && dataRooms.some(r => origRooms.includes(r))) {
-              foundOld = { entryName, data };
-              break;
-            }
-          } catch {
+      const f = await entryHandle.getFile();
+      const data = JSON.parse(await f.text());
+      const dataName = String(data.name || "").trim().toLowerCase();
+      const origName = String(editGuest.guest?.name || "").trim().toLowerCase();
+      const dataRooms = Array.isArray(data.room)
+        ? data.room.map(Number)
+        : [Number(data.room)];
+      // Match by original name and at least one overlapping room
+      if (dataName === origName && dataRooms.some(r => origRooms.includes(r))) {
+        foundOld = { entryName, data };
+        break;
+      }
+    } catch (err) {
+      continue;
+    }
+  }[1]
+
+  if (foundOld) {
+    const newData = {
+      ...foundOld.data,
+      name: editNameInput,
+      room: newRooms,
+      rate: Number(editRateInput) || Number(foundOld.data.rate) || 0,
+      edited: true
+    };[1]
+    const safe = String(editNameInput).replace(/[^\w\-]+/g, "_");
+    const roomsKeyNew = newRooms.join("_");
+    const newFileName = `checkin-${safe}-${roomsKeyNew}-${checkInISO}.json`;[1]
+    await writeJSON(checkinDir, newFileName, newData);[1]
+    // remove the old file if name/rooms changed
+    if (foundOld.entryName !== newFileName) {
+      try {
+        await checkinDir.removeEntry(foundOld.entryName);
+      } catch (e) {
+        console.warn("Failed to remove old checkin file", e);
+      }
+    }[1]
+
+    // Also update RentCollections so previous payments map to the new rooms
+    try {
+      const rentRoot = await ensurePath(base, ["RentCollections"]);
+      for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
+        if (dateHandle.kind !== "directory") continue;
+        for await (const [rentFileName, rentFileHandle] of dateHandle.entries()) {
+          if (rentFileHandle.kind !== "file" || !rentFileName.endsWith(".json"))
             continue;
-          }
-        }
-        if (foundOld) {
-          const newData = {
-            ...foundOld.data,
-            name: editNameInput,
-            room: newRooms,
-            rate: Number(editRateInput) || Number(foundOld.data.rate) || 0,
-            edited: true
-          };
-          const safe = String(editNameInput).replace(/[^\w\-]+/g, "_");
-          const roomsKeyNew = newRooms.join("_");
-          const newFileName = `checkin-${safe}-${roomsKeyNew}-${checkInISO}.json`;
-          await writeJSON(checkinDir, newFileName, newData);
-          if (foundOld.entryName !== newFileName) {
-            try { await checkinDir.removeEntry(foundOld.entryName); } catch (e) { console.warn("Failed to remove old checkin file", e); }
-          }
           try {
-            const rentRoot = await ensurePath(base, ["RentCollections"]);
-            for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
-              if (dateHandle.kind !== "directory") continue;
-              for await (const [rentFileName, rentFileHandle] of dateHandle.entries()) {
-                if (rentFileHandle.kind !== "file" || !rentFileName.endsWith(".json")) continue;
-                try {
-                  const rf = await rentFileHandle.getFile();
-                  const rentData = JSON.parse(await rf.text());
-                  const paidRooms = Array.isArray(rentData.room) ? rentData.room.map(Number) : [Number(rentData.room)];
-                  const paidName = String(rentData.name || "").trim().toLowerCase();
-                  const origName2 = String(editGuest.guest?.name || "").trim().toLowerCase();
-                  const intersects = paidRooms.some(pr => origRooms.includes(Number(pr)));
-                  if (intersects && paidName === origName2) {
-                    const updatedRent = { ...rentData, room: newRooms };
-                    try { await writeJSON(dateHandle, rentFileName, updatedRent); } catch (err) { console.warn("Failed to update rent file", rentFileName, err); }
-                  }
-                } catch {
-                  continue;
-                }
+            const rf = await rentFileHandle.getFile();
+            const rentData = JSON.parse(await rf.text());
+            const paidRooms = Array.isArray(rentData.room)
+              ? rentData.room.map(Number)
+              : [Number(rentData.room)];
+            const paidName = String(rentData.name || "").trim().toLowerCase();
+            const origName = String(editGuest.guest?.name || "")
+              .trim()
+              .toLowerCase();
+            const intersects = paidRooms.some(pr =>
+              origRooms.includes(Number(pr))
+            );
+            if (intersects && paidName === origName) {
+              // update the rent entry's room to refer to the new rooms (group)
+              const updatedRent = { ...rentData, room: newRooms };
+              try {
+                await writeJSON(dateHandle, rentFileName, updatedRent);
+              } catch (err) {
+                console.warn("Failed to update rent file", rentFileName, err);
               }
             }
           } catch (err) {
-            console.warn("Failed to update RentCollections for edited booking", err);
+            continue;
           }
         }
       }
     } catch (err) {
-      console.warn("Failed to persist edit to disk:", err);
+      console.warn(
+        "Failed to update RentCollections for edited booking",
+        err
+      );
+    }[1]
+  }
+}
+} catch (err) {
+console.warn("Failed to persist edit to disk:", err);
+}
+
+setShowEditModal(false);
+setEditGuest(null);
+// trigger refresh of occupiedRooms/payment/scanned checks
+setRefreshKey(k => k + 1);
+};
+
+  // Search ScannedDocuments for a matching file and open preview modal
+  const openGuestPreview = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+      const safe = String(group.guest?.name || '').replace(/[\W_]+/g, '_').toLowerCase();
+      let foundHandle = null;
+      let foundName = null;
+
+      async function recurse(dir) {
+        for await (const [entryName, entryHandle] of dir.entries()) {
+          if (entryHandle.kind === 'directory') {
+            await recurse(entryHandle);
+            if (foundHandle) return;
+          } else if (entryHandle.kind === 'file') {
+            if (entryName.toLowerCase().includes(safe)) {
+              foundHandle = entryHandle;
+              foundName = entryName;
+              return;
+            }
+          }
+        }
+      }
+
+      await recurse(scannedRoot);
+      if (!foundHandle) return alert('No scanned document found for this guest');
+      const file = await foundHandle.getFile();
+      const url = URL.createObjectURL(file);
+      setPreviewFileName(foundName);
+      setPreviewUrl(url);
+      setShowPreviewModal(true);
+      return;
+    } catch (err) {
+      console.warn('Preview open failed', err);
+      // fallback: try remote link.json mapping
     }
 
-    setShowEditModal(false);
-    setEditGuest(null);
-    setRefreshKey(k => k + 1);
-  }
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+      // read link.json at root
+      try {
+        const fh = await base.getFileHandle('link.json');
+        const existing = await readJSONFile(fh);
+        const safe = String(group.guest?.name || '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        // find any mapping where filename includes safe
+        for (const [k, v] of Object.entries(existing || {})) {
+          if (k.toLowerCase().includes(safe)) {
+            // fetch remote file as blob
+            const API_BASE = window.__MONGO_API_BASE__ || '/api';
+            const baseUrl = API_BASE.startsWith('http') ? API_BASE.replace(/\/api$/, '') : '';
+            const url = (baseUrl || '') + `/api/download/${v.id}`;
+            try {
+              const r = await fetch(url);
+              if (!r.ok) throw new Error('Download failed');
+              const blob = await r.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              setPreviewFileName(k);
+              setPreviewUrl(objectUrl);
+              setShowPreviewModal(true);
+              return;
+            } catch (e) {
+              console.warn('Remote preview failed', e);
+            }
+          }
+        }
+      } catch (e) {
+        // no link.json or read failed
+      }
+      alert('Failed to open scanned document');
+      return;
+    } catch (err2) {
+      console.warn('Remote fallback failed', err2);
+      alert('Failed to open scanned document');
+    }
+  };
 
-  // Many local/disk helpers omitted for brevity; keep existing helpers as-is.
+  // Compute a key to identify a guest group
+  const groupKey = (group) => `${String(group.guest?.name||'').toLowerCase()}::${(group.guest?.checkIn||'').slice(0,10)}`;
+
+  // Check ScannedDocuments for each occupied group and set scannedMap
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const scannedRoot = await ensurePath(base, ['ScannedDocuments']);
+        const newMap = { ...scannedMap };
+        for (const g of occupiedRooms) {
+          const safe = String(g.guest?.name || '').replace(/[\W_]+/g, '_').toLowerCase();
+          let found = false;
+          async function recurse(dir) {
+            for await (const [entryName, entryHandle] of dir.entries()) {
+              if (found) return;
+              if (entryHandle.kind === 'directory') {
+                await recurse(entryHandle);
+              } else if (entryHandle.kind === 'file') {
+                if (entryName.toLowerCase().includes(safe)) { found = true; return; }
+              }
+            }
+          }
+          await recurse(scannedRoot);
+          newMap[groupKey(g)] = found;
+        }
+        setScannedMap(newMap);
+      } catch (err) {
+        // ignore
+      }
+    })();
+  }, [occupiedRooms]);
+
+  // Compute total payments for each occupied group from RentCollections (from checkIn date to today)
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = await getBaseFolder();
+        if (!base) return;
+        const rentRoot = await ensurePath(base, ['RentCollections']);
+
+        const todayISO = (new Date()).toISOString().slice(0,10);
+        const map = {};
+
+        // Prepare groups for quick checks
+        const groups = occupiedRooms.map(g => ({
+          key: groupKey(g),
+          name: String(g.guest?.name || '').trim().toLowerCase(),
+          rooms: new Set((g.rooms || []).map(Number)),
+          since: (g.guest?.checkIn || '').slice(0,10) || todayISO
+        }));
+
+        for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
+          if (dateHandle.kind !== 'directory') continue;
+
+          // For each file in this date folder
+          for await (const [fileName, fileHandle] of dateHandle.entries()) {
+            if (fileHandle.kind !== 'file' || !fileName.endsWith('.json')) continue;
+            try {
+              const f = await fileHandle.getFile();
+              const data = JSON.parse(await f.text());
+              const paidName = String(data.name || '').trim().toLowerCase();
+              const paidRooms = Array.isArray(data.room) ? data.room.map(Number) : [Number(data.room)];
+              const amount = Number(data.amount) || 0;
+
+              // Check this rent entry against each group
+              for (const grp of groups) {
+                // Only consider entries between group's checkin and today
+                if (dateFolder < grp.since || dateFolder > todayISO) continue;
+                if (paidName !== grp.name) continue;
+                const intersects = paidRooms.some(pr => grp.rooms.has(Number(pr)));
+                if (intersects) {
+                  map[grp.key] = (map[grp.key] || 0) + amount;
+                }
+              }
+            } catch (err) {
+              // skip bad files
+              continue;
+            }
+          }
+        }
+
+        setPaymentsMap(map);
+      } catch (err) {
+        console.warn('Failed to compute payments map', err);
+      }
+    })();
+  }, [occupiedRooms]);
+
+  // Attach a scanned file to a guest group: try scanner temp, else pick file, then write to ScannedDocuments
+  const attachScanToGuest = async (group) => {
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+
+      // non-blocking: ask native scanner to open if available
+      try {
+        if (window.__TAURI__ && typeof window.__TAURI__.invoke === 'function') {
+          window.__TAURI__.invoke('open_scanner_ui').catch(() => {});
+        }
+      } catch (e) { /* ignore */ }
+
+      // Try reading from _ScannerTemp (if present). Be defensive: if any step fails, fall back to picker.
+      let fileToSave = null;
+      let fileName = null;
+      try {
+        const tempDir = await ensurePath(base, ['_ScannerTemp']);
+        let latest = null;
+        let latestTime = 0;
+        let latestName = null;
+        for await (const [name, handle] of tempDir.entries()) {
+          try {
+            if (handle.kind === 'file' && /\.(jpg|jpeg|png|pdf)$/i.test(name)) {
+              const file = await handle.getFile();
+              if (file && file.lastModified > latestTime) {
+                latestTime = file.lastModified; latest = file; latestName = name; }
+            }
+          } catch (e) {
+            // ignore single file errors and continue scanning
+            console.warn('Error reading temp entry', name, e);
+            continue;
+          }
+        }
+        if (latest) {
+          // Instead of immediately saving, open a preview popup showing the temp file.
+          try {
+            const url = URL.createObjectURL(latest);
+            setTempPending({ file: latest, name: latestName, tempHandle: null, tempName: latestName, tempHandleRef: null, group });
+            setTempPreviewUrl(url);
+            setShowTempModal(true);
+            return; // wait for user's confirmation to save
+          } catch (e) {
+            // if preview creation fails, fall back to immediate save path
+            console.warn('Failed to preview temp file, will fallback to save', e);
+            fileToSave = latest; fileName = latestName;
+          }
+        }
+      } catch (e) {
+        // Could not read _ScannerTemp (not present or permission); fall back to file picker
+        console.warn('Scanner temp read failed, will fallback to picker', e);
+      }
+
+      if (!fileToSave) {
+        // pick file from user and show the same preview + OK modal as scanner temp
+        if (window.showOpenFilePicker) {
+          try {
+            const [handle] = await window.showOpenFilePicker({ multiple: false, types: [{ description: 'Images or PDF', accept: {'image/*':['.png','.jpg','.jpeg'], 'application/pdf':['.pdf']} }] });
+            const file = await handle.getFile();
+            fileToSave = file; fileName = handle.name || file.name;
+          } catch (err) {
+            // user probably cancelled
+            console.warn('File picker cancelled or failed', err);
+            return;
+          }
+        } else {
+          const picked = await new Promise((resolve) => {
+            const input = document.createElement('input'); input.type = 'file'; input.accept = '.jpg,.jpeg,.png,.pdf,image/*'; input.style.display = 'none'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null); document.body.appendChild(input); input.click(); setTimeout(() => document.body.removeChild(input), 1000);
+          });
+          if (!picked) return; fileToSave = picked; fileName = picked.name;
+        }
+
+        // Create a preview and ask user to confirm saving (same UX as scanner temp)
+        try {
+          const url = URL.createObjectURL(fileToSave);
+          setTempPending({ file: fileToSave, name: fileName, tempName: null, tempHandle: null, group });
+          setTempPreviewUrl(url);
+          setShowTempModal(true);
+          return; // wait for confirmation
+        } catch (e) {
+          console.warn('Failed to preview picked file, will fallback to immediate save', e);
+          // fallthrough to immediate save below
+        }
+      }
+
+      if (!fileToSave) throw new Error('No file to save');
+
+  // Use the same destination logic as the Check-In flow: save under today's ScannedDocuments folder
+  const now = new Date();
+  const todayISOstr = ymd(now);
+  const year = String(now.getFullYear());
+  const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+  const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
+
+  const safeName = String(group.guest?.name || '').replace(/[^\w\-]+/g, '_').toLowerCase() || 'guest';
+  const roomsKey = (group.rooms || []).join('_') || 'rooms';
+  const rawExt = (fileName && fileName.includes('.')) ? fileName.split('.').pop() : (fileToSave.name && fileToSave.name.split('.').pop()) || 'jpg';
+  const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'jpg';
+  let candidate = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`;
+  // final sanitation: allow only safe filename chars
+  const newFileName = candidate.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      try {
+        await writeFile(scansDir, newFileName, fileToSave);
+        // also try to upload to server and store link metadata at root
+        try {
+          const { uploadFileToServer } = await import('./services/upload');
+          const resp = await uploadFileToServer(fileToSave);
+          // write link.json at root with mapping
+          try {
+            await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() });
+          } catch (e) { /* ignore link write failures */ }
+        } catch (e) {
+          console.warn('Upload failed or not configured', e);
+        }
+      } catch (e) {
+        console.error('Failed writing scan file', e);
+        return alert('Failed to save scanned file: ' + (e?.message || String(e)));
+      }
+
+      // mark map and show a small success message (no post-save preview required)
+      setScannedMap(m => ({ ...m, [groupKey(group)]: true }));
+      setSuccessMsg('Scanned document saved');
+      setTimeout(() => setSuccessMsg(''), 2500);
+    } catch (err) {
+      console.warn('Attach scan failed', err);
+      alert('Failed to attach scan: ' + (err?.message || String(err)));
+    }
+  };
+
+  // User confirms saving the temp scanned file to ScannedDocuments and deletion from _ScannerTemp
+  const saveTempScanConfirmed = async () => {
+    if (!tempPending) return;
+    try {
+      const base = await getBaseFolder();
+      if (!base) return alert('Storage not connected');
+
+  const { group, file, tempName } = tempPending;
+  // Use today's folder and filename pattern (same as Check-In flow)
+  const now = new Date();
+  const todayISOstr = ymd(now);
+  const year = String(now.getFullYear());
+  const month = now.toLocaleString('en-US', { month: 'short' }).toLowerCase();
+  const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const scansDir = await ensurePath(base, ['ScannedDocuments', year, month, dateFolder]);
+
+  const safeName = String(group.guest?.name || '').replace(/[^\w\-]+/g, '_').toLowerCase() || 'guest';
+  const roomsKey = (group.rooms || []).join('_') || 'rooms';
+  const rawExt = (tempPending.name && tempPending.name.includes('.')) ? tempPending.name.split('.').pop() : (file.name && file.name.split('.').pop()) || 'jpg';
+  const ext = String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'jpg';
+  const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  await writeFile(scansDir, newFileName, file);
+  // attempt upload
+  try {
+    const { uploadFileToServer } = await import('./services/upload');
+    const resp = await uploadFileToServer(file);
+    try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
+  } catch (e) { console.warn('Upload failed', e); }
+
+      // delete temp entry (best-effort)
+      try {
+        const tempDir = await ensurePath(base, ['_ScannerTemp']);
+        await tempDir.removeEntry(tempName);
+      } catch (e) {
+        console.warn('Failed to delete temp scan after save', e);
+      }
+
+  setScannedMap(m => ({ ...m, [groupKey(group)]: true }));
+  setSuccessMsg('Scanned document saved');
+  setTimeout(() => setSuccessMsg(''), 2500);
+    } catch (err) {
+      console.error('Save temp failed', err);
+      alert('Failed to save scanned file: ' + (err?.message || String(err)));
+    } finally {
+      // cleanup temp modal state
+      if (tempPreviewUrl) { URL.revokeObjectURL(tempPreviewUrl); setTempPreviewUrl(null); }
+      setTempPending(null);
+      setShowTempModal(false);
+    }
+  };
+
+  const cancelTempPreview = () => {
+    if (tempPreviewUrl) URL.revokeObjectURL(tempPreviewUrl);
+    setTempPreviewUrl(null);
+    setTempPending(null);
+    setShowTempModal(false);
+  };
+
+  // Cleanup preview URL when modal closes
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const handleRoomClick = (room) => {
     if (room.status === "occupied") return;
@@ -714,9 +1107,14 @@ function CheckIn({ state, setState, locationState }) {
     setSelectedRoom(room.number);
     setForm(f => {
       const existing = Array.isArray(f.room) ? f.room : (f.room ? [f.room] : []);
+      // toggle selection
       const idx = existing.indexOf(room.number);
       const nextRooms = idx === -1 ? [...existing, room.number] : existing.filter(x => x !== room.number);
-      return { ...f, room: nextRooms, name: reservedName || f.name };
+      return {
+        ...f,
+        room: nextRooms,
+        name: reservedName || f.name
+      };
     });
     setGuestMatches([]);
     if (reservedName && reservedName.length >= 2) {
@@ -730,27 +1128,137 @@ function CheckIn({ state, setState, locationState }) {
       const base = await getBaseFolder();
       if (!base) return;
       const dir = await ensurePath(base, ["Reservations", date]);
-      const safe = String(name).replace(/[^\w-]+/g, "_");
-      await dir.removeEntry(`reservation-${room}-${safe}.json`);
+      const safe = String(name).replace(/[^\w\-]+/g, "_");
+  await dir.removeEntry(`reservation-${room}-${safe}.json`);
     } catch (err) {
       console.warn("Failed to delete reservation file", err);
     }
   }
 
-  // saveCheckinData keeps local/disk behavior unchanged
+  async function searchScansRecursively(dirHandle, safeQuery, results, query) {
+    for await (const [entryName, entryHandle] of dirHandle.entries()) {
+      if (entryHandle.kind === "directory") {
+        await searchScansRecursively(entryHandle, safeQuery, results, query);
+      } else if (entryHandle.kind === "file") {
+        if (entryName.toLowerCase().includes(safeQuery)) {
+          let baseName = entryName.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+          let nameOnly = baseName.split(/[-/]| \d/)[0].trim();
+          results.push({
+            source: "scanfile",
+            name: nameOnly || query,
+            contact: "",
+            room: "",
+            scanInfo: { name: nameOnly || query, fileName: entryName, fileHandle: entryHandle }
+          });
+        }
+      }
+    }
+  }
+
+  async function searchGuestMatches(query) {
+    if (!nameFocusedRef.current || !query || query.length < 2) {
+      setGuestMatches([]);
+      return;
+    }
+    try {
+      const base = await getBaseFolder();
+      if (!base) return;
+      const results = [];
+      const safeQuery = query.toLowerCase().replace(/[^\w\-]+/g, "_");
+
+      // From Checkouts
+      const checkoutsRoot = await ensurePath(base, ["Checkouts"]);
+      for await (const [dateFolder, dateHandle] of checkoutsRoot.entries()) {
+        if (dateHandle.kind === "directory") {
+          for await (const [fileName, fileHandle] of dateHandle.entries()) {
+            if (fileHandle.kind === "file" && fileName.endsWith(".json")) {
+              const file = await fileHandle.getFile();
+              const data = JSON.parse(await file.text());
+              if (data.name?.toLowerCase().includes(query.toLowerCase())) {
+                results.push({
+                  source: "checkout",
+                  name: data.name,
+                  contact: data.contact || "",
+                  room: data.room,
+                  scanInfo: { checkInDate: data.checkInDate || dateFolder, checkInTime: data.checkInTime || "", name: data.name }
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // From ScannedDocuments
+      const scannedRoot = await ensurePath(base, ["ScannedDocuments"]);
+      await searchScansRecursively(scannedRoot, safeQuery, results, query);
+
+      if (nameFocusedRef.current) setGuestMatches(results);
+    } catch (err) {
+      console.warn("Guest search failed:", err);
+    }
+  }
+
+  async function useGuestMatch(match) {
+    setForm(f => ({ ...f, name: match.name, contact: match.contact }));
+    setGuestMatches([]);
+    try {
+      const base = await getBaseFolder();
+      if (!base) return;
+
+      const safeName = match.scanInfo.name.replace(/[^\w\-]+/g, "_");
+
+      if (match.source === "scanfile" && match.scanInfo.fileHandle) {
+        setScanFile({
+          reused: true,
+          fileHandle: match.scanInfo.fileHandle,
+          safeName,
+          name: match.scanInfo.fileName
+        });
+      } else if (match.source === "checkout" && match.scanInfo.checkInDate) {
+  const parsed = buildScanFolders(match.scanInfo.checkInDate);
+  if (!parsed) {
+    console.warn("Invalid checkInDate for scan:", match.scanInfo.checkInDate);
+    return;
+  }
+
+  const { year: oldYear, month: oldMonth, folder: oldDateFolder } = parsed;
+  const oldScanDir = await ensurePath(base, ["ScannedDocuments", oldYear, oldMonth, oldDateFolder]);
+
+  for await (const [entryName, entryHandle] of oldScanDir.entries()) {
+    if (entryHandle.kind === "file" && entryName.toLowerCase().includes(safeName.toLowerCase())) {
+      setScanFile({
+        reused: true,
+        fileHandle: entryHandle,
+        safeName,
+        name: entryName
+      });
+      console.log("Found old scan from checkout:", entryName);
+      break;
+    }
+  }
+}
+
+    } catch (err) {
+      console.warn("Scan reuse failed", err);
+    }
+  }
+
   const saveCheckinData = async (guest) => {
     const base = await getBaseFolder();
     if (!base) return console.warn("Storage not connected.");
+
     const now = new Date();
     const todayISOstr = ymd(now);
+
     const dataDir = await ensurePath(base, ["Checkins", todayISOstr]);
-    const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
-    const roomsKey = roomsArr.join('_');
-    await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
+  // guest.room is array or single; normalize to array
+  const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
+  const roomsKey = roomsArr.join('_');
+  await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
 
     const year = String(now.getFullYear());
     const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
-    const dateFolder = `${String(now.getDate()).padStart(2,"0")}-${String(now.getMonth()+1).padStart(2,"0")}-${now.getFullYear()}`;
+    const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth()+1)}-${now.getFullYear()}`;
     const scansDir = await ensurePath(base, ["ScannedDocuments", year, month, dateFolder]);
 
     if (scanFile?.reused && scanFile?.fileHandle) {
@@ -759,11 +1267,13 @@ function CheckIn({ state, setState, locationState }) {
       const newFileName = `${safeName}-${guest.room}-${todayISOstr}.${ext}`;
       const file = await scanFile.fileHandle.getFile();
       await writeFile(scansDir, newFileName, file);
+      // attempt upload to server for remote access
       try {
         const { uploadFileToServer } = await import('./services/upload');
         const resp = await uploadFileToServer(file);
-        try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch {}
+        try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
       } catch (e) { console.warn('Upload failed', e); }
+      console.log("Reused old scan saved:", newFileName);
       return;
     }
 
@@ -771,10 +1281,14 @@ function CheckIn({ state, setState, locationState }) {
       const ext = scanFile.name && scanFile.name.includes(".") ? scanFile.name.split(".").pop() : "jpg";
       const newFileName = `${guest.name}-${guest.room}-${todayISOstr}.${ext}`;
       await writeFile(scansDir, newFileName, scanFile.file);
+      console.log("Saved scanned file:", newFileName);
+
+      // If this file was picked up from the temporary scanner folder, attempt to delete the temp entry
       if (scanFile.tempName) {
         try {
           const tempDir = await ensurePath(base, ["_ScannerTemp"]);
           await tempDir.removeEntry(scanFile.tempName);
+          console.log("Deleted temp scan:", scanFile.tempName);
         } catch (err) {
           console.warn("Failed to delete temp scan file:", err);
         }
@@ -782,18 +1296,17 @@ function CheckIn({ state, setState, locationState }) {
     }
   };
 
-  // Submit: local update + disk + mirror a single check-in event to backend
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.room || (Array.isArray(form.room) && form.room.length === 0)) return alert("Select a room");
-    if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
+  if (!form.room) return alert("Select a room");
+  if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
 
     const now = new Date();
     const checkInDate = now.toLocaleDateString();
     const checkInTime = now.toLocaleTimeString();
 
-    setSuccessMsg(`Room ${Array.isArray(form.room) ? form.room.join(", ") : form.room} reserved successfully`);
-    setForm({ name: "", contact: "", room: [], rate: "" });
+    setSuccessMsg(`Room ${form.room} reserved successfully`);
+    setForm({ name: "", contact: "", room: "", rate: "" });
     setSelectedRoom(null);
     setScanFile(null);
     setTimeout(() => setSuccessMsg(""), 3000);
@@ -810,8 +1323,8 @@ function CheckIn({ state, setState, locationState }) {
                 name: form.name,
                 contact: form.contact,
                 checkIn: now.toISOString(),
-                checkInDate,
-                checkInTime,
+                checkInDate,    // ✅ human-readable
+                checkInTime,    // ✅ human-readable
                 rate: Number(form.rate) || 0
               }
             }
@@ -819,6 +1332,7 @@ function CheckIn({ state, setState, locationState }) {
       );
     });
 
+    // Remove matching reservations for any of the rooms checked-in
     const roomsSet = new Set(roomsToOccupy.map(Number));
     const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
     if (reservationMatches.length) {
@@ -841,27 +1355,9 @@ function CheckIn({ state, setState, locationState }) {
       rate: Number(form.rate) || 0
     });
 
-    // Mirror as a single event row to backend (NOT floors snapshot)
-    try {
-      const payload = {
-        name: form.name,
-        room: roomsToOccupy,
-        contact: form.contact || '',
-        checkInDate,
-        checkInTime,
-        checkInDateTime: now.toISOString(),
-        rate: Number(form.rate) || 0
-      };
-      await fetch(`${API_BASE}/checkin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    } catch (mirrorErr) {
-      console.warn('Remote checkin mirror failed:', mirrorErr);
-    }
-
-    setRefreshKey(k => k + 1);
+    
+  // refresh the grouped view so Current Guests updates immediately
+  setRefreshKey(k => k + 1);
   };
 
   const legendDot = (bg) => ({
@@ -875,7 +1371,7 @@ function CheckIn({ state, setState, locationState }) {
       r.status === "occupied" ? "rgba(139, 224, 164, 0.6)" :
       "rgba(255, 255, 255, 0.6)";
     const isDisabled = r.status === "occupied";
-    const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
+  const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
     return {
       cursor: isDisabled ? "not-allowed" : "pointer",
       height: 56,
@@ -895,9 +1391,7 @@ function CheckIn({ state, setState, locationState }) {
     };
   };
 
-  useEffect(() => () => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-  }, []);
+  useEffect(() => () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }, []);
 
   async function scanFromLocalScanner() {
     try {
@@ -1018,11 +1512,6 @@ function CheckIn({ state, setState, locationState }) {
     };
   }, [scanFile]);
 
-const groupKey = (group) => {
-const name = String(group?.guest?.name || "").toLowerCase();
-const cin = String(group?.guest?.checkIn || "").slice(0, 10);
-return `${name}::${cin}`;
-};
   
 
   return (
@@ -2120,62 +2609,42 @@ async function deleteReservationFile(date, room, name) {
 function Reservations({ state, setState }) {
   const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
   const [availableRooms, setAvailableRooms] = useState([]);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(""); // 🔍 search query
 
+  
   // --- Calculate available rooms for a given date ---
   const updateAvailableRooms = (selectedDate) => {
     if (!selectedDate) {
       setAvailableRooms([]);
       return;
     }
+
     const rooms = [];
-    for (const floor of Object.values(state.floors || {})) {
+
+    for (const floor of Object.values(state.floors)) {
       for (const room of floor) {
         const isOccupied = room.status === 'occupied';
         const isReservedThatDate = (state.reservations || []).some(
-          r => Number(r.room) === Number(room.number) && r.date === selectedDate
+          r => r.room === room.number && r.date === selectedDate
         );
+
         if (!isOccupied && !isReservedThatDate) {
           rooms.push(room.number);
         }
       }
     }
+
     setAvailableRooms(rooms);
   };
 
-  // Resolve API base once
-  const API_BASE =
-    window.MONGO_API_BASE ||
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-    '/api';
-
-  // Mirror a reservation event to backend (not floors snapshot)
-  async function mirrorReservationToServer(resObj) {
-    try {
-      await fetch(`${API_BASE}/reservation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: resObj.name,
-          place: resObj.place || '',
-          room: Number(resObj.room),
-          date: resObj.date
-        })
-      });
-    } catch (e) {
-      console.warn('Remote reservation mirror failed:', e);
-    }
-  }
-
   // Add new reservation
-  const addReservation = async (e) => {
+  const addReservation = (e) => {
     e.preventDefault();
     if (!form.name || !form.place || !form.room || !form.date) {
-      alert('Please fill all fields');
-      return;
+      return alert('Please fill all fields');
     }
 
-    // Create the reservation object once
+    // ✅ Create the reservation object once
     const resObj = {
       name: form.name,
       place: form.place,
@@ -2183,7 +2652,7 @@ function Reservations({ state, setState }) {
       date: form.date,
     };
 
-    // Push to UI state
+    // Push to new state
     const newState = { ...state };
     if (!newState.reservations) newState.reservations = [];
     newState.reservations.push(resObj);
@@ -2194,16 +2663,13 @@ function Reservations({ state, setState }) {
     setState(newState);
     saveState(newState);
 
-    // Save the same reservation object to disk
+    // ✅ Save the same reservation object to disk
     persistReservation(resObj);
-
-    // NEW: Mirror to backend as an event row
-    mirrorReservationToServer(resObj).catch(() => {});
   };
 
   // Delete reservation with confirmation + disk removal
   const deleteReservation = async (i) => {
-    const res = (state.reservations || [])[i];
+    const res = state.reservations[i];
     if (!res) return;
 
     const confirmed = window.confirm(
@@ -2211,55 +2677,42 @@ function Reservations({ state, setState }) {
     );
     if (!confirmed) return;
 
-    const newState = { ...state, reservations: [...(state.reservations || [])] };
+    const newState = { ...state };
     newState.reservations.splice(i, 1);
     setState(newState);
     saveState(newState);
 
-    // Remove from disk
+    // ✅ Remove from disk
     await deleteReservationFile(res.date, res.room, res.name);
-
-    // Optional: If backend supports deleting by id or signature, call it here.
-    // Example (only if your API supports it):
-    // try {
-    //   await fetch(`${API_BASE}/reservation`, {
-    //     method: 'DELETE',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify({ name: res.name, room: res.room, date: res.date })
-    //   });
-    // } catch (e) {
-    //   console.warn('Remote reservation delete mirror failed:', e);
-    // }
   };
 
   const navigate = useNavigate();
 
-  const checkInReservation = (res) => {
-    navigate('/checkin', {
-      state: {
-        prefName: res.name,
-        prefRoom: res.room
-      }
-    });
-  };
+const checkInReservation = (res) => {
+  navigate('/checkin', {
+    state: {
+      prefName: res.name,
+      prefRoom: res.room
+    }
+  });
+};
 
-  // Filter reservations based on search box
+  // 🔍 Filter reservations based on search box
   const filteredReservations = (state.reservations || []).filter(r => {
     const q = search.toLowerCase();
     return (
-      String(r.name || '').toLowerCase().includes(q) ||
-      String(r.place || '').toLowerCase().includes(q) ||
+      r.name.toLowerCase().includes(q) ||
+      (r.place && r.place.toLowerCase().includes(q)) ||
       String(r.room).includes(q) ||
-      String(r.date).includes(q)
+      r.date.includes(q)
     );
   });
 
   return (
     <div>
       <div>
-        <div style={{ paddingBottom: 10 }} className="title">Reservations</div>
-      </div>
-
+          <div style={{ paddingBottom: 10}} className="title">Reservations</div>
+        </div>
       <form style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} onSubmit={addReservation}>
         <input
           className="input"
@@ -2295,7 +2748,7 @@ function Reservations({ state, setState }) {
           <option value="">Select a free room</option>
           {availableRooms.map(num => (
             <option key={num} value={num}>
-              {num} — Floor {String(num)}
+              {num} — Floor {String(num)[0]}
             </option>
           ))}
         </select>
@@ -2303,7 +2756,7 @@ function Reservations({ state, setState }) {
         <button className="btn primary" type="submit">Add</button>
       </form>
 
-      {/* Search Box */}
+       {/* 🔍 Search Box */}
       <input
         className="input"
         style={{ marginBottom: 12 }}
@@ -2312,12 +2765,13 @@ function Reservations({ state, setState }) {
         onChange={e => setSearch(e.target.value)}
       />
 
+
       <div className="list">
         {(!state.reservations || state.reservations.length === 0) && (
           <div style={{ color: 'var(--muted)' }}>No reservations</div>
         )}
-        {filteredReservations.map((r, i) => (
-          <div key={`${r.name}-${r.room}-${r.date}-${i}`} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        {state.reservations && state.reservations.map((r, i) => (
+          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
             <div>
               <div style={{ fontWeight: 700 }}>
                 {r.name} - <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{r.place}</span>
@@ -3843,11 +4297,16 @@ function KPI({ title, value, color }) {
 // ---------- App ----------
 export default function App() {
   const [state, setState] = useState(loadState());
-  useEffect(() => {
-saveState(state);
-// Disable automatic remote full-state mirroring:
-// (see note above if a feature flag is desired)
-}, [state]);
+  useEffect(() => { 
+    saveState(state); 
+    // attempt to write to remote (non-blocking)
+    (async () => {
+      try {
+        const { saveAll } = await import('./services/dualSync');
+        saveAll(state).catch(e => console.warn('remote save failed', e));
+      } catch (e) { console.warn('dualSync import failed', e); }
+    })();
+  }, [state]);
 
   useEffect(() => {
   (async () => {
