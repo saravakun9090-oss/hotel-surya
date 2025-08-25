@@ -8,6 +8,13 @@ import { MongoClient, GridFSBucket, ObjectId } from 'mongodb';
 
 dotenv.config();
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .catch(err => console.warn('SW register failed', err));
+  });
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
