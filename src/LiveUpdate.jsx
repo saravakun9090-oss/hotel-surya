@@ -1,19 +1,19 @@
 // src/LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
-// Optional subpages (leave imports if subpages exist in src/liveupdate/*)
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-const API_BASE =
+// Force backend URL always, even if storage is not connected
+// If a VITE_MONGO_API_BASE is present, use it; otherwise default to the provided URL.
+const FORCED_API =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
     ? import.meta.env.VITE_MONGO_API_BASE
-    : (window.__MONGO_API_BASE__ || '/api');
+    : 'https://hotel-app-backend-2gxi.onrender.com/api';
 
-// Theme tokens (compact, high-contrast)
+// Compact theme tokens
 const COLORS = {
   deep: '#2c3f34',
   cream: '#f7f5ee',
@@ -23,18 +23,20 @@ const COLORS = {
   btnText: '#f5f7f4'
 };
 
-// Polling helper
+// Polling helper that always calls backend
 function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
   useEffect(() => {
     let mounted = true;
     let timer = null;
+
     const once = async () => {
       try {
         if (!url) throw new Error('No API URL configured');
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: 'no-store' });
         const ct = (res.headers.get('content-type') || '').toLowerCase();
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         if (!ct.includes('application/json')) throw new Error('Server returned non-JSON response');
@@ -49,14 +51,16 @@ function usePolling(url, interval = 2500) {
         setLoading(false);
       }
     };
+
     once();
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
+
   return { data, loading, error };
 }
 
-// Unified pill style
+// Unified pill
 const PILL_COLOR = COLORS.btn;
 const Pill = ({ to, active, children }) => (
   <Link
@@ -77,6 +81,7 @@ const Pill = ({ to, active, children }) => (
   </Link>
 );
 
+// Small legend dot
 const legendDot = (bg) => ({
   display: 'inline-block',
   width: 8,
@@ -88,6 +93,7 @@ const legendDot = (bg) => ({
   border: '1px solid rgba(0,0,0,0.08)'
 });
 
+// Compact room tile
 const roomBoxStyle = (r) => {
   const base = {
     display: 'flex',
@@ -108,14 +114,46 @@ const roomBoxStyle = (r) => {
   return { ...base, background: '#ffffff' };
 };
 
+// Normalize check-in date to yyyy-mm-dd
 function normalizeCheckInYmd(guest) {
   if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
   if (guest?.checkInDate) {
     const d = guest.checkInDate;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) { const [dd, mm, yyyy] = d.split('/'); return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`; }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
+      const [dd, mm, yyyy] = d.split('/');
+      return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+    }
     if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   }
   return '';
+}
+
+// Build two indices for payments: preferred exact by checkInYmd, fallback approx by name+roomsKey
+function buildPaymentsIndex(rentPayments) {
+  const exact = new Map();
+  const approx = new Map();
+  for (const p of rentPayments || []) {
+    const amount = Number(p.amount) || 0;
+    const name = (p.name || '').trim().toLowerCase();
+    const cin = (p.checkInYmd || '').slice(0, 10);
+    const date = (p.date || '').slice(0, 10);
+    const roomsKey = Array.isArray(p.room)
+      ? p.room.slice().sort((a, b) => a - b).join('')
+      : String(p.room || '')
+          .split(',')
+          .map(s => Number(s.trim()))
+          .filter(Boolean)
+          .sort((a, b) => a - b)
+          .join('');
+    if (name && cin) {
+      const k = `${name}::${cin}`;
+      exact.set(k, (exact.get(k) || 0) + amount);
+    } else if (name) {
+      const k2 = `${name}::${roomsKey}::${date}`;
+      approx.set(k2, (approx.get(k2) || 0) + amount);
+    }
+  }
+  return { exact, approx };
 }
 
 export default function LiveUpdate() {
@@ -123,9 +161,10 @@ export default function LiveUpdate() {
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
-  const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
+  // Always poll the remote backend /state
+  const { data: remoteState, loading, error } = usePolling(`${FORCED_API}/state`, 2500);
 
-  // Search for Current Guests card
+  // Search lives inside Current Guests card
   const [guestSearch, setGuestSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -156,55 +195,15 @@ export default function LiveUpdate() {
     }
     const list = Array.from(map.values()).map(x => ({
       guest: x.guest,
-      rooms: x.rooms.sort((a,b)=>a-b),
-      _checkInTs: x.checkIn ? new Date(x.checkIn).getTime() || 0 : 0
+      rooms: x.rooms.sort((a, b) => a - b),
+      _checkInTs: x.checkIn ? (new Date(x.checkIn).getTime() || 0) : 0
     }));
-    list.sort((a,b)=>b._checkInTs - a._checkInTs);
+    list.sort((a, b) => b._checkInTs - a._checkInTs);
     return list;
   }, [allRooms]);
 
-  // Exact stay-matched payments by name::checkInYmd
-  const paymentsByStayKey = useMemo(() => {
-    const sums = new Map();
-    for (const p of rentPayments) {
-      const name = (p.name || '').trim().toLowerCase();
-      const cin = (p.checkInYmd || '').slice(0, 10);
-      if (!name || !cin) continue;
-      const key = `${name}::${cin}`;
-      sums.set(key, (sums.get(key) || 0) + (Number(p.amount) || 0));
-    }
-    return sums;
-  }, [rentPayments]);
-
-  // Hoisted payments index used across UI
-  const paymentsIndex = useMemo(() => {
-    const exact = new Map();
-    const approx = new Map();
-    for (const p of rentPayments) {
-      const amount = Number(p.amount) || 0;
-      const name = (p.name || "").trim().toLowerCase();
-      const cin = (p.checkInYmd || "").slice(0, 10);
-      const date = (p.date || "").slice(0, 10);
-
-      const roomsKey = Array.isArray(p.room)
-        ? p.room.slice().sort((a,b)=>a-b).join("_")
-        : String(p.room || "")
-            .split(",")
-            .map(s => Number(s.trim()))
-            .filter(Boolean)
-            .sort((a,b)=>a-b)
-            .join("_");
-
-      if (name && cin) {
-        const k = `${name}::${cin}`;
-        exact.set(k, (exact.get(k) || 0) + amount);
-      } else if (name) {
-        const k2 = `${name}::${roomsKey}::${date}`;
-        approx.set(k2, (approx.get(k2) || 0) + amount);
-      }
-    }
-    return { exact, approx };
-  }, [rentPayments]);
+  // Build payments index (exact and fallback)
+  const paymentsIndex = useMemo(() => buildPaymentsIndex(rentPayments), [rentPayments]);
 
   // Current Guests card
   const currentGuestsCard = useMemo(() => {
@@ -215,7 +214,6 @@ export default function LiveUpdate() {
       const rooms = (g.rooms || []).map(String).join(', ');
       return name.includes(q) || rooms.includes(q);
     });
-
     return (
       <div
         className="card"
@@ -257,20 +255,18 @@ export default function LiveUpdate() {
               const name = g.guest?.name || 'Guest';
               const initials =
                 (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-
               const cinYmd = normalizeCheckInYmd(g.guest);
-              const nameKey = (name || "").trim().toLowerCase();
-              const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
+              const nameKey = (name || '').trim().toLowerCase();
+              const roomsKey = (g.rooms || []).slice().sort((a, b) => a - b).join('_');
 
-              // Paid so far via indices: prefer exact (name::checkInYmd), then approximate aggregation
-              let paidSoFar = 0;
-              if (cinYmd) {
-                paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
-              }
+              // Preferred: exact by name::checkInYmd
+              let paidSoFar = cinYmd ? (paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0) : 0;
+
+              // Fallback: aggregate approx by name + roomsKey if exact not found
               if (!paidSoFar) {
                 let sum = 0;
                 for (const [k, v] of paymentsIndex.approx.entries()) {
-                  const [nm, rk] = k.split("::");
+                  const [nm, rk] = k.split('::');
                   if (nm === nameKey && rk === roomsKey) sum += v;
                 }
                 paidSoFar = sum;
@@ -375,6 +371,7 @@ export default function LiveUpdate() {
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
+
                 return (
                   <div key={floorNum} style={{ marginBottom: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
