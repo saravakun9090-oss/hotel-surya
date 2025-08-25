@@ -185,85 +185,104 @@ app.post('/api/state', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Create rent payment (returns inserted id)
+// Rent payment: create
 app.post('/api/rent-payment', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+try {
+await ensureDb();
+if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const body = req.body || {};
+const doc = {
+  name: String(body.name || '').trim(),
+  room: Array.isArray(body.room)
+    ? body.room.map(Number)
+    : String(body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean),
+  days: Number(body.days) || 0,
+  amount: Number(body.amount) || 0,
+  mode: String(body.mode || 'Cash'),
+  date: body.date || new Date().toISOString().slice(0, 10),
+  checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0, 10) : null,
+  createdAt: new Date().toISOString()
+};
 
-    const body = req.body || {};
-    const doc = {
-      name: String(body.name || '').trim(),
-      room: Array.isArray(body.room)
-        ? body.room.map(Number)
-        : String(body.room || '')
-            .split(',')
-            .map(s => Number(s.trim()))
-            .filter(Boolean),
-      days: Number(body.days) || null,
-      amount: Number(body.amount) || 0,
-      mode: String(body.mode || 'Cash'),
-      date: body.date || new Date().toISOString().slice(0, 10),
-      checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0,10) : null,
-      createdAt: new Date().toISOString()
-    };
-
-    const result = await rentPaymentsCol.insertOne(doc);
-    res.json({ ok: true, id: String(result.insertedId) });
-  } catch (e) {
-    console.error('POST /api/rent-payment failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
+const result = await rentPaymentsCol.insertOne(doc);
+sseBroadcast('rent:update', { action: 'created', id: String(result.insertedId) });
+res.json({ ok: true, id: String(result.insertedId) });
+} catch (e) {
+res.status(500).json({ ok: false, error: String(e) });
+}
 });
 
-// Update a rent payment (days, amount, mode)
+// Rent payment: update by id
 app.put('/api/rent-payment/:id', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+try {
+await ensureDb();
+if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const id = String(req.params.id || '');
+const patch = {};
+if (req.body?.name !== undefined) patch.name = String(req.body.name || '').trim();
+if (req.body?.room !== undefined) {
+  const rooms = Array.isArray(req.body.room)
+    ? req.body.room.map(Number)
+    : String(req.body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+  patch.room = rooms;
+}
+if (req.body?.days !== undefined)   patch.days = Number(req.body.days) || 0;
+if (req.body?.amount !== undefined) patch.amount = Number(req.body.amount) || 0;
+if (req.body?.mode !== undefined)   patch.mode = String(req.body.mode || 'Cash');
 
-    const id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+const result = await rentPaymentsCol.updateOne({ _id: new ObjectId(id) }, { $set: patch });
+if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
 
-    const patch = {};
-    if (req.body?.days !== undefined)   patch.days = Number(req.body.days) || 0;
-    if (req.body?.amount !== undefined) patch.amount = Number(req.body.amount) || 0;
-    if (req.body?.mode !== undefined)   patch.mode = String(req.body.mode || 'Cash');
-
-    if (Object.keys(patch).length === 0) {
-      return res.status(400).json({ ok: false, error: 'no fields to update' });
-    }
-
-    const result = await rentPaymentsCol.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: patch }
-    );
-
-    if (result.matchedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('PUT /api/rent-payment/:id failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
+sseBroadcast('rent:update', { action: 'updated', id });
+res.json({ ok: true });
+} catch (e) {
+res.status(500).json({ ok: false, error: String(e) });
+}
 });
 
-// Delete a rent payment
+// Rent payment: delete by id
 app.delete('/api/rent-payment/:id', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+try {
+await ensureDb();
+if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const id = String(req.params.id || '');
+const result = await rentPaymentsCol.deleteOne({ _id: new ObjectId(id) });
+if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
 
-    const id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+sseBroadcast('rent:update', { action: 'deleted', id });
+res.json({ ok: true });
+} catch (e) {
+res.status(500).json({ ok: false, error: String(e) });
+}
+});
 
-    const result = await rentPaymentsCol.deleteOne({ _id: new ObjectId(id) });
-    if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
+// Rent payment: remap all payments for a stay (name/rooms change)
+app.post('/api/rent-payment/remap', async (req, res) => {
+try {
+await ensureDb();
+if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const { fromName, toName, fromRooms, toRooms, sinceYmd } = req.body || {};
+const q = {};
 
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('DELETE /api/rent-payment/:id failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
+if (sinceYmd) q.date = { $gte: String(sinceYmd).slice(0, 10) };
+if (fromName) q.name = String(fromName).trim();
+if (Array.isArray(fromRooms) && fromRooms.length) {
+  // match any overlap with paid rooms
+  q.room = { $in: fromRooms.map(Number) };
+}
+
+const u = {};
+if (toName) u.name = String(toName).trim();
+if (Array.isArray(toRooms) && toRooms.length) u.room = toRooms.map(Number);
+
+if (Object.keys(u).length === 0) return res.json({ ok: true, matched: 0, modified: 0 });
+
+const result = await rentPaymentsCol.updateMany(q, { $set: u });
+if (result.modifiedCount) sseBroadcast('rent:update', { action: 'remapped', count: result.modifiedCount });
+res.json({ ok: true, matched: result.matchedCount || 0, modified: result.modifiedCount || 0 });
+} catch (e) {
+res.status(500).json({ ok: false, error: String(e) });
+}
 });
 
 // Add an expense (returns inserted id)
