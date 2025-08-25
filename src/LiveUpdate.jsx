@@ -1,3 +1,4 @@
+// LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -6,6 +7,7 @@ import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
+// Resolve API base the same way other modules do
 const API_BASE =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
     ? import.meta.env.VITE_MONGO_API_BASE
@@ -126,10 +128,10 @@ export default function LiveUpdate() {
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
-  // Backend state only
+  // Backend-only state
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Search in Current Guests
+  // Current Guests search
   const [guestSearch, setGuestSearch] = useState('');
 
   // Floors strictly from backend
@@ -155,6 +157,7 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
+  // Group occupied rooms by (guest.name + guest.checkIn/checkInDate)
   const occupiedGroups = useMemo(() => {
     const map = new Map();
     for (const r of allRooms) {
@@ -172,6 +175,7 @@ export default function LiveUpdate() {
     return list;
   }, [allRooms]);
 
+  // Build a payments index: prefer exact match by (name, checkInYmd); else approximate by (name, roomsKey, paymentDate)
   const paymentsIndex = useMemo(() => {
     const exact = new Map();
     const approx = new Map();
@@ -184,11 +188,11 @@ export default function LiveUpdate() {
       const roomsKey = Array.isArray(p.room)
         ? p.room.slice().sort((a, b) => a - b).join("_")
         : String(p.room || "")
-          .split(",")
-          .map(s => Number(s.trim()))
-          .filter(Boolean)
-          .sort((a, b) => a - b)
-          .join("_");
+            .split(",")
+            .map(s => Number(s.trim()))
+            .filter(Boolean)
+            .sort((a, b) => a - b)
+            .join("_");
 
       if (name && cin) {
         const k = `${name}::${cin}`;
@@ -201,6 +205,7 @@ export default function LiveUpdate() {
     return { exact, approx };
   }, [rentPayments]);
 
+  // Current Guests card
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -209,211 +214,211 @@ export default function LiveUpdate() {
       const rooms = (g.rooms || []).map(String).join(', ');
       return name.includes(q) || rooms.includes(q);
     });
+
     return (
-  <div
-    className="card"
-    style={{
-      padding: 12,
-      marginBottom: 10,
-      borderRadius: 10,
-      boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-      background: COLORS.cream,
-      border: `1px solid ${COLORS.border}`
-    }}
-  >
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-      <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.deep }}>Current Guests</div>
-      <div style={{ fontSize: 13, color: COLORS.muted }}>{occupiedGroups.length} occupied</div>
-    </div>
-
-    <div style={{ marginBottom: 10 }}>
-      <input
-        className="input"
-        style={{
-          width: '100%',
-          padding: '10px 12px',
-          borderRadius: 10,
-          border: `1px solid ${COLORS.border}`,
-          background: '#fff'
-        }}
-        placeholder="Search guest or room..."
-        value={guestSearch}
-        onChange={(e) => setGuestSearch(e.target.value)}
-      />
-    </div>
-
-    {occupiedGroups.length === 0 && <div style={{ color: COLORS.muted }}>No rooms are occupied</div>}
-
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-        {filtered.map((g, idx) => {
-          const name = g.guest?.name || 'Guest';
-          const initials =
-            (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-
-          const cinYmd = normalizeCheckInYmd(g.guest);
-          const nameKey = (name || "").trim().toLowerCase();
-          const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
-
-          let paidSoFar = 0;
-          if (cinYmd) {
-            paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
-          }
-          if (!paidSoFar) {
-            let sum = 0;
-            for (const [k, v] of paymentsIndex.approx.entries()) {
-              const [nm, rk] = k.split("::");
-              if (nm === nameKey && rk === roomsKey) sum += v;
-            }
-            paidSoFar = sum;
-          }
-
-          return (
-            <div
-              key={idx}
-              className="card"
-              style={{
-                display: 'flex',
-                gap: 12,
-                alignItems: 'center',
-                padding: 10,
-                borderRadius: 12,
-                border: `1px solid ${COLORS.border}`,
-                background: '#fff'
-              }}
-            >
-              <div style={{
-                width: 44, height: 44, borderRadius: 10, background: COLORS.cream,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14, color: COLORS.deep
-              }}>
-                {initials}
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
-                    {name}
-                  </div>
-                  <div style={{ fontSize: 12, color: COLORS.muted }}>
-                    Room {(g.rooms || []).join(', ')}
-                  </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
-                  <div>Phone no: {g.guest?.contact || '—'}</div>
-                  <div>Price: ₹{g.guest?.rate || 0}/day</div>
-                  <div>In: {g.guest?.checkInDate || (g.guest?.checkIn ? new Date(g.guest.checkIn).toLocaleDateString() : '—')} {g.guest?.checkInTime || ''}</div>
-                  <div>Paid till now: ₹{paidSoFar}</div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  </div>
-);
-}, [occupiedGroups, guestSearch, paymentsIndex]);
-
-const sub = path.split('/').pop();
-
-const renderSubpage = () => {
-if (sub === 'reservations') return <ReservationsPage data={serverState} />;
-if (sub === 'checkout') return <CheckoutPage data={serverState} />;
-if (sub === 'rentpayment') return <RentPaymentPage data={serverState} />;
-if (sub === 'expenses') return <ExpensesPage data={serverState} />;
-return null;
-};
-
-return (
-<div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
-{isRootLiveUpdate && (
-<div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
-<div className="flex-1">
-<div className="flex gap-2 mb-2" style={{ overflowX: 'auto', paddingBottom: 2 }}>
-<Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
-<Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
-<Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
-<Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
-</div>
-</div>
-</div>
-)}
-
-text
-  <div className="flex flex-col md:flex-row gap-4">
-    {isRootLiveUpdate && (
-      <div style={{ flex: 1, minWidth: 280 }}>
-        <div
-          className="card"
-          style={{
-            padding: 12,
-            marginBottom: 10,
-            borderRadius: 10,
-            background: COLORS.cream,
-            boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-            border: `1px solid ${COLORS.border}`
-          }}
-        >
-          <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.deep }}>Room Layout (Today)</div>
-
-          <div style={{ display: 'flex', gap: 10, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
-            <div><span style={legendDot('#ffffff')} /> Free</div>
-            <div><span style={legendDot('#ffe3a6')} /> Reserved</div>
-            <div><span style={legendDot('#bfe8cb')} /> Occupied</div>
-          </div>
-
-          {Object.keys(roomsByFloor).map(floorNum => {
-            const list = roomsByFloor[floorNum];
-            if (!list || list.length === 0) return null;
-            return (
-              <div key={floorNum} style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
-                  Floor {floorNum}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, alignItems: 'stretch' }}>
-                  {list.map(r => (
-                    <div
-                      key={r.number}
-                      style={roomBoxStyle(r)}
-                      title={
-                        r.status === 'reserved'
-                          ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                          : r.status === 'occupied'
-                          ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                          : 'Free'
-                      }
-                    >
-                      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
-                        {String(r.number).padStart(2, '0')}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    )}
-
-    <div className="flex-1">
       <div
-        className="border rounded p-3 md:p-4"
+        className="card"
         style={{
-          borderColor: COLORS.border,
-          background: '#fff',
-          borderRadius: 12,
-          boxShadow: '0 2px 12px rgba(0,0,0,0.05)'
+          padding: 12,
+          marginBottom: 10,
+          borderRadius: 10,
+          boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
+          background: COLORS.cream,
+          border: `1px solid ${COLORS.border}`
         }}
       >
-        {isRootLiveUpdate ? currentGuestsCard : (renderSubpage() || null)}
-      </div>
-    </div>
-  </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.deep }}>Current Guests</div>
+          <div style={{ fontSize: 13, color: COLORS.muted }}>{occupiedGroups.length} occupied</div>
+        </div>
 
-  {loading && <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>Loading...</div>}
-  {error && <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
-</div>
-);
+        <div style={{ marginBottom: 10 }}>
+          <input
+            className="input"
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: `1px solid ${COLORS.border}`,
+              background: '#fff'
+            }}
+            placeholder="Search guest or room..."
+            value={guestSearch}
+            onChange={(e) => setGuestSearch(e.target.value)}
+          />
+        </div>
+
+        {occupiedGroups.length === 0 && <div style={{ color: COLORS.muted }}>No rooms are occupied</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+            {filtered.map((g, idx) => {
+              const name = g.guest?.name || 'Guest';
+              const initials =
+                (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
+
+              const cinYmd = normalizeCheckInYmd(g.guest);
+              const nameKey = (name || "").trim().toLowerCase();
+              const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
+
+              let paidSoFar = 0;
+              if (cinYmd) {
+                paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
+              }
+              if (!paidSoFar) {
+                let sum = 0;
+                for (const [k, v] of paymentsIndex.approx.entries()) {
+                  const [nm, rk] = k.split("::");
+                  if (nm === nameKey && rk === roomsKey) sum += v;
+                }
+                paidSoFar = sum;
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className="card"
+                  style={{
+                    display: 'flex',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: 10,
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.border}`,
+                    background: '#fff'
+                  }}
+                >
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 10, background: COLORS.cream,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 14, color: COLORS.deep
+                  }}>
+                    {initials}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
+                        {name}
+                      </div>
+                      <div style={{ fontSize: 12, color: COLORS.muted }}>
+                        Room {(g.rooms || []).join(', ')}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
+                      <div>Phone no: {g.guest?.contact || '—'}</div>
+                      <div>Price: ₹{g.guest?.rate || 0}/day</div>
+                      <div>In: {g.guest?.checkInDate || (g.guest?.checkIn ? new Date(g.guest.checkIn).toLocaleDateString() : '—')} {g.guest?.checkInTime || ''}</div>
+                      <div>Paid till now: ₹{paidSoFar}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }, [occupiedGroups, guestSearch, paymentsIndex]);
+
+  const sub = path.split('/').pop();
+
+  const renderSubpage = () => {
+    if (sub === 'reservations') return <ReservationsPage data={serverState} />;
+    if (sub === 'checkout') return <CheckoutPage data={serverState} />;
+    if (sub === 'rentpayment') return <RentPaymentPage data={serverState} />;
+    if (sub === 'expenses') return <ExpensesPage data={serverState} />;
+    return null;
+  };
+
+  return (
+    <div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
+      {isRootLiveUpdate && (
+        <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
+          <div className="flex-1">
+            <div className="flex gap-2 mb-2" style={{ overflowX: 'auto', paddingBottom: 2 }}>
+              <Pill to="/liveupdate/checkout" active={sub === 'checkout' || isRootLiveUpdate}>Checkout</Pill>
+              <Pill to="/liveupdate/reservations" active={sub === 'reservations'}>Reservations</Pill>
+              <Pill to="/liveupdate/rentpayment" active={sub === 'rentpayment'}>Rent Payments</Pill>
+              <Pill to="/liveupdate/expenses" active={sub === 'expenses'}>Expenses</Pill>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col md:flex-row gap-4">
+        {isRootLiveUpdate && (
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div
+              className="card"
+              style={{
+                padding: 12,
+                marginBottom: 10,
+                borderRadius: 10,
+                background: COLORS.cream,
+                boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
+                border: `1px solid ${COLORS.border}`
+              }}
+            >
+              <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.deep }}>Room Layout (Today)</div>
+
+              <div style={{ display: 'flex', gap: 10, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
+                <div><span style={legendDot('#ffffff')} /> Free</div>
+                <div><span style={legendDot('#ffe3a6')} /> Reserved</div>
+                <div><span style={legendDot('#bfe8cb')} /> Occupied</div>
+              </div>
+
+              {Object.keys(roomsByFloor).map(floorNum => {
+                const list = roomsByFloor[floorNum];
+                if (!list || list.length === 0) return null;
+                return (
+                  <div key={floorNum} style={{ marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
+                      Floor {floorNum}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, alignItems: 'stretch' }}>
+                      {list.map(r => (
+                        <div
+                          key={r.number}
+                          style={roomBoxStyle(r)}
+                          title={
+                            r.status === 'reserved'
+                              ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+                              : r.status === 'occupied'
+                              ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                              : 'Free'
+                          }
+                        >
+                          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
+                            {String(r.number).padStart(2, '0')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1">
+          <div
+            className="border rounded p-3 md:p-4"
+            style={{
+              borderColor: COLORS.border,
+              background: '#fff',
+              borderRadius: 12,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.05)'
+            }}
+          >
+            {isRootLiveUpdate ? currentGuestsCard : (renderSubpage() || null)}
+          </div>
+        </div>
+      </div>
+
+      {loading && <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>Loading...</div>}
+      {error && <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
 }

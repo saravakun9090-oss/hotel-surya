@@ -359,6 +359,15 @@ function FloorsPage({ state, setState, floorNumber }) {
       state.floors[floorNumber].map(r => (r.number === number ? { ...r, ...patch } : r));
     setState(newState);
     saveState(newState);
+    // In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
+
   };
 
   return (
@@ -633,6 +642,14 @@ return r;
 // Update app state and persist to localStorage first
 setState(newState);
 saveState(newState);
+// In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
 
 // Then attempt to update the on-disk checkin JSON file for this booking (if storage connected)
 try {
@@ -1344,6 +1361,15 @@ await deleteReservationFile(rm.date, rm.room, rm.name);
 
 setState(newState);
 saveState(newState);
+// In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
+
 
 await saveCheckinData({
 name: form.name,
@@ -2048,6 +2074,15 @@ function CheckOut({ state, setState }) {
       saveState(newState);
       showSuccess("✅ Check-Out completed successfully");
       loadCheckoutList();
+      // In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
+
 
       // Mirror checkout to backend with complete details
       try {
@@ -2680,6 +2715,15 @@ setForm({ name: '', place: '', room: '', date: '' });
 
 setState(newState);
 saveState(newState);
+// In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
+
 
 persistReservation(resObj);
 
@@ -2718,6 +2762,15 @@ await fetch(`${API_BASE}/reservation`, {
     newState.reservations.splice(i, 1);
     setState(newState);
     saveState(newState);
+    // In App, after setState(newState) and saveState(newState):
+try {
+  if ('BroadcastChannel' in window) {
+    const bc = new BroadcastChannel('hotel_state');
+    bc.postMessage({ type: 'state:update', state: newState });
+    bc.close();
+  }
+} catch {}
+
 
     // ✅ Remove from disk
     await deleteReservationFile(res.date, res.room, res.name);
