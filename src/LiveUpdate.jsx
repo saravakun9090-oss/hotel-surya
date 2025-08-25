@@ -188,6 +188,39 @@ return list;
       return name.includes(q) || rooms.includes(q);
     });
 
+    // Build two indices:
+// 1) exactKey: name::checkInYmd (preferred if row.has checkInYmd)
+// 2) approxKey: name::roomsKey::date (fallback using posted date if no checkInYmd)
+const paymentsIndex = useMemo(() => {
+const exact = new Map();
+const approx = new Map();
+for (const p of rentPayments) {
+const amount = Number(p.amount) || 0;
+const name = (p.name || "").trim().toLowerCase();
+const cin = (p.checkInYmd || "").slice(0, 10);
+const date = (p.date || "").slice(0, 10);
+const roomsKey = Array.isArray(p.room)
+? p.room.slice().sort((a,b)=>a-b).join("")
+: String(p.room || "")
+.split(",")
+.map(s => Number(s.trim()))
+.filter(Boolean)
+.sort((a,b)=>a-b)
+.join("");
+if (name && cin) {
+  const k = `${name}::${cin}`;
+  exact.set(k, (exact.get(k) || 0) + amount);
+} else if (name) {
+  const k2 = `${name}::${roomsKey}::${date}`;
+  approx.set(k2, (approx.get(k2) || 0) + amount);
+}
+}
+return { exact, approx };
+}, [rentPayments]);
+
+
+
+
     return (
       <div
         className="card"
@@ -229,10 +262,25 @@ return list;
               const name = g.guest?.name || 'Guest';
               const initials =
                 (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
+              
+              // Later inside mapping of filtered guests:
               const cinYmd = normalizeCheckInYmd(g.guest);
-              const paidKey = `${(name || '').trim().toLowerCase()}::${cinYmd}`;
-              const paidSoFar = paymentsByStayKey.get(paidKey) || 0;
-
+              const nameKey = (name || "").trim().toLowerCase();
+              const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
+              let paidSoFar = 0;
+              if (cinYmd) {
+              paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
+              }
+              // Fallback: use approx index by name + roomsKey + any payment date in range
+              if (!paidSoFar) {
+              // Try aggregating all dates for that roomsKey signature if server didn’t backfill checkInYmd
+              let sum = 0;
+              for (const [k, v] of paymentsIndex.approx.entries()) {
+              const [nm, rk] = k.split("::");
+              if (nm === nameKey && rk === roomsKey) sum += v;
+              }
+              paidSoFar = sum;
+              }
               return (
                 <div
                   key={idx}
@@ -278,7 +326,7 @@ return list;
         </div>
       </div>
     );
-  }, [occupiedGroups, guestSearch, paymentsByStayKey]);
+  }, [occupiedGroups, guestSearch, paymentsIndex]);
 
   const sub = path.split('/').pop();
 
