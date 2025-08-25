@@ -8,13 +8,6 @@ import { MongoClient, GridFSBucket, ObjectId } from 'mongodb';
 
 dotenv.config();
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .catch(err => console.warn('SW register failed', err));
-  });
-}
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -32,6 +25,28 @@ let bucket;
 let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
+
+// Simple in-memory SSE clients registry
+const sseClients = {
+  // eventName -> Set(res)
+  rent: new Set(),
+  expenses: new Set(),
+};
+function sseBroadcast(channel, payload) {
+  // channel is one of 'rent' | 'expenses'
+  const set = sseClients[channel];
+  if (!set) return;
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) {
+    try {
+      res.write(data);
+    } catch {
+      // drop dead connections
+      try { res.end(); } catch {}
+      set.delete(res);
+    }
+  }
+}
 
 async function initDb() {
   if (!MONGO_URI) {
@@ -74,6 +89,7 @@ async function ensureDb() {
   }
 }
 
+// Health/debug
 app.get('/api/ping', async (req, res) => {
   await ensureDb();
   if (!col) return res.status(500).json({ ok: false, msg: 'mongo not initialized' });
@@ -95,6 +111,38 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
+// SSE endpoints (optional consumers)
+app.get('/api/sse/rent', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  sseClients.rent.add(res);
+  // send a comment to keep connection open
+  res.write(': connected to rent channel\n\n');
+
+  req.on('close', () => {
+    try { res.end(); } catch {}
+    sseClients.rent.delete(res);
+  });
+});
+
+app.get('/api/sse/expenses', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  sseClients.expenses.add(res);
+  res.write(': connected to expenses channel\n\n');
+
+  req.on('close', () => {
+    try { res.end(); } catch {}
+    sseClients.expenses.delete(res);
+  });
+});
+
 // multer memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -111,13 +159,20 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const uploadStream = bucket.openUploadStream(filename);
 
     readable
-      .on('error', (err) => res.status(500).json({ ok: false, error: String(err) }))
+      .on('error', (err) => {
+        console.error('Readable error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+      })
       .pipe(uploadStream)
-      .on('error', (err) => res.status(500).json({ ok: false, error: String(err) }))
+      .on('error', (err) => {
+        console.error('Upload stream error:', err);
+        res.status(500).json({ ok: false, error: String(err) });
+      })
       .on('finish', (file) => {
         res.json({ ok: true, id: file._id.toString(), filename: file.filename });
       });
   } catch (e) {
+    console.error('POST /api/upload failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
@@ -130,9 +185,13 @@ app.get('/api/download/:id', async (req, res) => {
 
     const _id = new ObjectId(String(req.params.id));
     const downloadStream = bucket.openDownloadStream(_id);
-    downloadStream.on('error', (err) => res.status(404).send(String(err)));
+    downloadStream.on('error', (err) => {
+      console.error('Download stream error:', err);
+      res.status(404).send(String(err));
+    });
     downloadStream.pipe(res);
   } catch (e) {
+    console.error('GET /api/download/:id failed:', e);
     res.status(500).send(String(e));
   }
 });
@@ -154,7 +213,7 @@ app.get('/api/state', async (req, res) => {
       expensesCol.find({}).sort({ date: -1 }).toArray(),
     ]);
 
-    const mapWithId = (arr) => arr.map(d => {
+    const mapWithId = (arr) => (Array.isArray(arr) ? arr : []).map(d => {
       const { _id, ...rest } = d || {};
       return { id: _id ? String(_id) : undefined, ...rest };
     });
@@ -180,116 +239,129 @@ app.get('/api/state', async (req, res) => {
 
 // Save base app state snapshot
 app.post('/api/state', async (req, res) => {
-  await ensureDb();
-  if (!col) return res.status(503).json({ ok: false, msg: 'mongo not initialized' });
+  try {
+    await ensureDb();
+    if (!col) return res.status(503).json({ ok: false, msg: 'mongo not initialized' });
 
-  const { state } = req.body || {};
-  await col.updateOne(
-    { _id: 'singleton' },
-    { $set: { state, updatedAt: new Date() } },
-    { upsert: true }
-  );
-  res.json({ ok: true });
+    const { state } = req.body || {};
+    await col.updateOne(
+      { _id: 'singleton' },
+      { $set: { state, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/state failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Rent payment: create
 app.post('/api/rent-payment', async (req, res) => {
-try {
-await ensureDb();
-if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const body = req.body || {};
-const doc = {
-  name: String(body.name || '').trim(),
-  room: Array.isArray(body.room)
-    ? body.room.map(Number)
-    : String(body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean),
-  days: Number(body.days) || 0,
-  amount: Number(body.amount) || 0,
-  mode: String(body.mode || 'Cash'),
-  date: body.date || new Date().toISOString().slice(0, 10),
-  checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0, 10) : null,
-  createdAt: new Date().toISOString()
-};
+  try {
+    await ensureDb();
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const body = req.body || {};
+    const doc = {
+      name: String(body.name || '').trim(),
+      room: Array.isArray(body.room)
+        ? body.room.map(Number)
+        : String(body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean),
+      days: Number(body.days) || 0,
+      amount: Number(body.amount) || 0,
+      mode: String(body.mode || 'Cash'),
+      date: body.date || new Date().toISOString().slice(0, 10),
+      checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0, 10) : null,
+      createdAt: new Date().toISOString()
+    };
 
-const result = await rentPaymentsCol.insertOne(doc);
-sseBroadcast('rent:update', { action: 'created', id: String(result.insertedId) });
-res.json({ ok: true, id: String(result.insertedId) });
-} catch (e) {
-res.status(500).json({ ok: false, error: String(e) });
-}
+    const result = await rentPaymentsCol.insertOne(doc);
+    sseBroadcast('rent', { action: 'created', id: String(result.insertedId) });
+    res.json({ ok: true, id: String(result.insertedId) });
+  } catch (e) {
+    console.error('POST /api/rent-payment failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Rent payment: update by id
 app.put('/api/rent-payment/:id', async (req, res) => {
-try {
-await ensureDb();
-if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const id = String(req.params.id || '');
-const patch = {};
-if (req.body?.name !== undefined) patch.name = String(req.body.name || '').trim();
-if (req.body?.room !== undefined) {
-  const rooms = Array.isArray(req.body.room)
-    ? req.body.room.map(Number)
-    : String(req.body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
-  patch.room = rooms;
-}
-if (req.body?.days !== undefined)   patch.days = Number(req.body.days) || 0;
-if (req.body?.amount !== undefined) patch.amount = Number(req.body.amount) || 0;
-if (req.body?.mode !== undefined)   patch.mode = String(req.body.mode || 'Cash');
+  try {
+    await ensureDb();
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const id = String(req.params.id || '');
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-const result = await rentPaymentsCol.updateOne({ _id: new ObjectId(id) }, { $set: patch });
-if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    const patch = {};
+    if (req.body?.name !== undefined) patch.name = String(req.body.name || '').trim();
+    if (req.body?.room !== undefined) {
+      const rooms = Array.isArray(req.body.room)
+        ? req.body.room.map(Number)
+        : String(req.body.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+      patch.room = rooms;
+    }
+    if (req.body?.days !== undefined)   patch.days = Number(req.body.days) || 0;
+    if (req.body?.amount !== undefined) patch.amount = Number(req.body.amount) || 0;
+    if (req.body?.mode !== undefined)   patch.mode = String(req.body.mode || 'Cash');
 
-sseBroadcast('rent:update', { action: 'updated', id });
-res.json({ ok: true });
-} catch (e) {
-res.status(500).json({ ok: false, error: String(e) });
-}
+    const result = await rentPaymentsCol.updateOne({ _id: new ObjectId(id) }, { $set: patch });
+    if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
+
+    sseBroadcast('rent', { action: 'updated', id });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('PUT /api/rent-payment/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Rent payment: delete by id
 app.delete('/api/rent-payment/:id', async (req, res) => {
-try {
-await ensureDb();
-if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const id = String(req.params.id || '');
-const result = await rentPaymentsCol.deleteOne({ _id: new ObjectId(id) });
-if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+  try {
+    await ensureDb();
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const id = String(req.params.id || '');
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-sseBroadcast('rent:update', { action: 'deleted', id });
-res.json({ ok: true });
-} catch (e) {
-res.status(500).json({ ok: false, error: String(e) });
-}
+    const result = await rentPaymentsCol.deleteOne({ _id: new ObjectId(id) });
+    if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+
+    sseBroadcast('rent', { action: 'deleted', id });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/rent-payment/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Rent payment: remap all payments for a stay (name/rooms change)
 app.post('/api/rent-payment/remap', async (req, res) => {
-try {
-await ensureDb();
-if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const { fromName, toName, fromRooms, toRooms, sinceYmd } = req.body || {};
-const q = {};
+  try {
+    await ensureDb();
+    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const { fromName, toName, fromRooms, toRooms, sinceYmd } = req.body || {};
+    const q = {};
 
-if (sinceYmd) q.date = { $gte: String(sinceYmd).slice(0, 10) };
-if (fromName) q.name = String(fromName).trim();
-if (Array.isArray(fromRooms) && fromRooms.length) {
-  // match any overlap with paid rooms
-  q.room = { $in: fromRooms.map(Number) };
-}
+    if (sinceYmd) q.date = { $gte: String(sinceYmd).slice(0, 10) };
+    if (fromName) q.name = String(fromName).trim();
+    if (Array.isArray(fromRooms) && fromRooms.length) {
+      // match any overlap with paid rooms
+      q.room = { $in: fromRooms.map(Number) };
+    }
 
-const u = {};
-if (toName) u.name = String(toName).trim();
-if (Array.isArray(toRooms) && toRooms.length) u.room = toRooms.map(Number);
+    const u = {};
+    if (toName) u.name = String(toName).trim();
+    if (Array.isArray(toRooms) && toRooms.length) u.room = toRooms.map(Number);
 
-if (Object.keys(u).length === 0) return res.json({ ok: true, matched: 0, modified: 0 });
+    if (Object.keys(u).length === 0) return res.json({ ok: true, matched: 0, modified: 0 });
 
-const result = await rentPaymentsCol.updateMany(q, { $set: u });
-if (result.modifiedCount) sseBroadcast('rent:update', { action: 'remapped', count: result.modifiedCount });
-res.json({ ok: true, matched: result.matchedCount || 0, modified: result.modifiedCount || 0 });
-} catch (e) {
-res.status(500).json({ ok: false, error: String(e) });
-}
+    const result = await rentPaymentsCol.updateMany(q, { $set: u });
+    if (result.modifiedCount) sseBroadcast('rent', { action: 'remapped', count: result.modifiedCount });
+    res.json({ ok: true, matched: result.matchedCount || 0, modified: result.modifiedCount || 0 });
+  } catch (e) {
+    console.error('POST /api/rent-payment/remap failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Add an expense (returns inserted id)
@@ -299,44 +371,42 @@ app.post('/api/expense', async (req, res) => {
     if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
     const body = req.body || {};
-const doc = {
-  description: String(body.description || '').trim(),
-  amount: Number(body.amount) || 0,
-  date: body.date || new Date().toISOString().slice(0, 10),
-  createdAt: new Date().toISOString()
-};
+    const doc = {
+      description: String(body.description || '').trim(),
+      amount: Number(body.amount) || 0,
+      date: body.date || new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString()
+    };
 
-const result = await expensesCol.insertOne(doc);
+    const result = await expensesCol.insertOne(doc);
 
-// Notify listeners that expenses changed
-sseBroadcast('expenses:update', { action: 'created', id: String(result.insertedId) });
+    // Notify listeners that expenses changed
+    sseBroadcast('expenses', { action: 'created', id: String(result.insertedId) });
 
-res.json({ ok: true, id: String(result.insertedId) });
-
+    res.json({ ok: true, id: String(result.insertedId) });
   } catch (e) {
     console.error('POST /api/expense failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Delete an expense
 // Delete an expense + SSE notify
 app.delete('/api/expense/:id', async (req, res) => {
-try {
-await ensureDb();
-if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+  try {
+    await ensureDb();
+    if (!expensesCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
     const id = String(req.params.id || '').trim();
-if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-const result = await expensesCol.deleteOne({ _id: new ObjectId(id) });
-if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
+    const result = await expensesCol.deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
 
-// Notify listeners that expenses changed
-sseBroadcast('expenses:update', { action: 'deleted', id });
+    // Notify listeners that expenses changed
+    sseBroadcast('expenses', { action: 'deleted', id });
 
-res.json({ ok: true });
-
+    res.json({ ok: true });
   } catch (e) {
     console.error('DELETE /api/expense/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
