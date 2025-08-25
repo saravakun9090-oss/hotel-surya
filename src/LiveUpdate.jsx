@@ -1,19 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
-// Optional subpages
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-// Resolve API base
 const API_BASE =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
     ? import.meta.env.VITE_MONGO_API_BASE
     : (window.MONGO_API_BASE || '/api');
 
-// Theme
 const COLORS = {
   deep: '#2c3f34',
   cream: '#f7f5ee',
@@ -23,7 +19,6 @@ const COLORS = {
   btnText: '#f5f7f4'
 };
 
-// Polling helper: only trusts backend JSON, never local demos
 function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -40,8 +35,6 @@ function usePolling(url, interval = 2500) {
         if (!ct.includes('application/json')) throw new Error('Server returned non-JSON response');
         const json = await res.json();
         if (!mounted) return;
-
-        // Hard guard: accept only object state; do not synthesize/demo
         const s = (json && typeof json === 'object' && json.state && typeof json.state === 'object') ? json.state : null;
         setData(s);
         setLoading(false);
@@ -50,7 +43,7 @@ function usePolling(url, interval = 2500) {
         if (!mounted) return;
         setError(String(e));
         setLoading(false);
-        // Do NOT inject any demo data on error
+        // Never inject demo/fallback data on error to keep backend-only behavior
       }
     };
     once();
@@ -60,7 +53,6 @@ function usePolling(url, interval = 2500) {
   return { data, loading, error };
 }
 
-// UI bits
 const PILL_COLOR = COLORS.btn;
 const Pill = ({ to, active, children }) => (
   <Link
@@ -116,10 +108,7 @@ function normalizeCheckInYmd(guest) {
   if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
   if (guest?.checkInDate) {
     const d = guest.checkInDate;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
-      const [dd, mm, yyyy] = d.split('/');
-      return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
-    }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) { const [dd, mm, yyyy] = d.split('/'); return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`; }
     if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   }
   return '';
@@ -132,13 +121,12 @@ export default function LiveUpdate() {
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Search in Current Guests
   const [guestSearch, setGuestSearch] = useState('');
 
-  // Strict “no demo” floors: if backend returns nothing or invalid, show empty layout
+  // Strict backend-only floors: if API has none/invalid, use an empty object (no demo)
   const floors = useMemo(() => {
     const f = remoteState?.floors;
-    return (f && typeof f === 'object') ? f : {}; // never synthesize demo floors
+    return (f && typeof f === 'object') ? f : {};
   }, [remoteState]);
 
   const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
@@ -157,7 +145,6 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
-  // Group occupied by guest (only backend-provided guests)
   const occupiedGroups = useMemo(() => {
     const map = new Map();
     for (const r of allRooms) {
@@ -175,7 +162,6 @@ export default function LiveUpdate() {
     return list;
   }, [allRooms]);
 
-  // Payment indices (backend-only)
   const paymentsIndex = useMemo(() => {
     const exact = new Map();
     const approx = new Map();
@@ -203,7 +189,6 @@ export default function LiveUpdate() {
     return { exact, approx };
   }, [rentPayments]);
 
-  // Current Guests card
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -331,7 +316,6 @@ export default function LiveUpdate() {
 
   return (
     <div className="p-3 md:p-4 max-w-7xl mx-auto" style={{ background: '#fff' }}>
-      {/* Tabs on /liveupdate */}
       {isRootLiveUpdate && (
         <div className="flex flex-col md:flex-row md:items-start gap-3 mb-3">
           <div className="flex-1">
@@ -345,8 +329,7 @@ export default function LiveUpdate() {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row gap-4">
-        {/* LEFT: Room Layout only on /liveupdate */}
+      <div className="flex flex-col md:flex-row gap: 4">
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
             <div
@@ -402,7 +385,6 @@ export default function LiveUpdate() {
           </div>
         )}
 
-        {/* RIGHT: subpages or default current guests */}
         <div className="flex-1">
           <div
             className="border rounded p-3 md:p-4"
