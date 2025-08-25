@@ -52,10 +52,7 @@ const number = f * 100 + r;
 floors[f].push({ number, status: "free", guest: null, reservedFor: null });
 }
 }
-  // sample data
-  floors[1][1].status = 'reserved'; floors[1][1].reservedFor = { name: 'A. Kumar', from: '2025-08-15' };
-  floors[2][2].status = 'occupied'; floors[2][2].guest = { name: 'Ravi', contact: '9876543210', checkIn: new Date().toISOString(), id: 'ID123', rate: 1500 };
-  floors[3][0].status = 'occupied'; floors[3][0].guest = { name: 'Priya', contact: '9345678123', checkIn: new Date().toISOString(), id: 'DL998', rate: 2000 };
+  
   return { floors, guests: [] };
 };
 
