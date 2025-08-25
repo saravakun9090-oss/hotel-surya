@@ -1,6 +1,8 @@
 // src/LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+
+// Optional subpages (leave imports if subpages exist in src/liveupdate/*)
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
@@ -17,7 +19,7 @@ const COLORS = {
   cream: '#f7f5ee',
   muted: '#2c3d34ff',
   border: 'rgba(0,0,0,0.12)',
-  btn: '#313e35',        // unified button color
+  btn: '#313e35',
   btnText: '#f5f7f4'
 };
 
@@ -54,7 +56,7 @@ function usePolling(url, interval = 2500) {
   return { data, loading, error };
 }
 
-// Unified pill (tab) style with single color 313e35
+// Unified pill style
 const PILL_COLOR = COLORS.btn;
 const Pill = ({ to, active, children }) => (
   <Link
@@ -75,7 +77,6 @@ const Pill = ({ to, active, children }) => (
   </Link>
 );
 
-// Small legend dot
 const legendDot = (bg) => ({
   display: 'inline-block',
   width: 8,
@@ -87,13 +88,12 @@ const legendDot = (bg) => ({
   border: '1px solid rgba(0,0,0,0.08)'
 });
 
-// Compact room tile
 const roomBoxStyle = (r) => {
   const base = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 44,                 // fixed height to remove vertical jitter
+    height: 44,
     borderRadius: 8,
     fontWeight: 700,
     fontSize: 13,
@@ -108,7 +108,6 @@ const roomBoxStyle = (r) => {
   return { ...base, background: '#ffffff' };
 };
 
-// Normalize check-in date to yyyy-mm-dd
 function normalizeCheckInYmd(guest) {
   if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
   if (guest?.checkInDate) {
@@ -126,7 +125,7 @@ export default function LiveUpdate() {
 
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Search lives inside Current Guests card
+  // Search for Current Guests card
   const [guestSearch, setGuestSearch] = useState('');
 
   const floors = useMemo(() => (remoteState?.floors || {}), [remoteState]);
@@ -148,24 +147,23 @@ export default function LiveUpdate() {
 
   // Group occupied by guest
   const occupiedGroups = useMemo(() => {
-const map = new Map();
-for (const r of allRooms) {
-if (r.status !== 'occupied' || !r.guest) continue;
-const key = `${r.guest.name || ''}::${r.guest.checkIn || ''}`;
-if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [], checkIn: r.guest.checkIn || r.guest.checkInDate || '' });
-map.get(key).rooms.push(r.number);
-}
-const list = Array.from(map.values()).map(x => ({
-guest: x.guest,
-rooms: x.rooms.sort((a,b)=>a-b),
-_checkInTs: x.checkIn ? new Date(x.checkIn).getTime() || 0 : 0
-}));
-// recent (latest check-in) first
-list.sort((a,b)=>b._checkInTs - a._checkInTs);
-return list;
-}, [allRooms]);
+    const map = new Map();
+    for (const r of allRooms) {
+      if (r.status !== 'occupied' || !r.guest) continue;
+      const key = `${r.guest.name || ''}::${r.guest.checkIn || ''}`;
+      if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [], checkIn: r.guest.checkIn || r.guest.checkInDate || '' });
+      map.get(key).rooms.push(r.number);
+    }
+    const list = Array.from(map.values()).map(x => ({
+      guest: x.guest,
+      rooms: x.rooms.sort((a,b)=>a-b),
+      _checkInTs: x.checkIn ? new Date(x.checkIn).getTime() || 0 : 0
+    }));
+    list.sort((a,b)=>b._checkInTs - a._checkInTs);
+    return list;
+  }, [allRooms]);
 
-  // Exact stay-matched payments: name::checkInYmd
+  // Exact stay-matched payments by name::checkInYmd
   const paymentsByStayKey = useMemo(() => {
     const sums = new Map();
     for (const p of rentPayments) {
@@ -178,6 +176,36 @@ return list;
     return sums;
   }, [rentPayments]);
 
+  // Hoisted payments index used across UI
+  const paymentsIndex = useMemo(() => {
+    const exact = new Map();
+    const approx = new Map();
+    for (const p of rentPayments) {
+      const amount = Number(p.amount) || 0;
+      const name = (p.name || "").trim().toLowerCase();
+      const cin = (p.checkInYmd || "").slice(0, 10);
+      const date = (p.date || "").slice(0, 10);
+
+      const roomsKey = Array.isArray(p.room)
+        ? p.room.slice().sort((a,b)=>a-b).join("_")
+        : String(p.room || "")
+            .split(",")
+            .map(s => Number(s.trim()))
+            .filter(Boolean)
+            .sort((a,b)=>a-b)
+            .join("_");
+
+      if (name && cin) {
+        const k = `${name}::${cin}`;
+        exact.set(k, (exact.get(k) || 0) + amount);
+      } else if (name) {
+        const k2 = `${name}::${roomsKey}::${date}`;
+        approx.set(k2, (approx.get(k2) || 0) + amount);
+      }
+    }
+    return { exact, approx };
+  }, [rentPayments]);
+
   // Current Guests card
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
@@ -187,39 +215,6 @@ return list;
       const rooms = (g.rooms || []).map(String).join(', ');
       return name.includes(q) || rooms.includes(q);
     });
-
-    // Build two indices:
-// 1) exactKey: name::checkInYmd (preferred if row.has checkInYmd)
-// 2) approxKey: name::roomsKey::date (fallback using posted date if no checkInYmd)
-const paymentsIndex = useMemo(() => {
-const exact = new Map();
-const approx = new Map();
-for (const p of rentPayments) {
-const amount = Number(p.amount) || 0;
-const name = (p.name || "").trim().toLowerCase();
-const cin = (p.checkInYmd || "").slice(0, 10);
-const date = (p.date || "").slice(0, 10);
-const roomsKey = Array.isArray(p.room)
-? p.room.slice().sort((a,b)=>a-b).join("")
-: String(p.room || "")
-.split(",")
-.map(s => Number(s.trim()))
-.filter(Boolean)
-.sort((a,b)=>a-b)
-.join("");
-if (name && cin) {
-  const k = `${name}::${cin}`;
-  exact.set(k, (exact.get(k) || 0) + amount);
-} else if (name) {
-  const k2 = `${name}::${roomsKey}::${date}`;
-  approx.set(k2, (approx.get(k2) || 0) + amount);
-}
-}
-return { exact, approx };
-}, [rentPayments]);
-
-
-
 
     return (
       <div
@@ -261,26 +256,26 @@ return { exact, approx };
             {filtered.map((g, idx) => {
               const name = g.guest?.name || 'Guest';
               const initials =
-                (String(name).split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-              
-              // Later inside mapping of filtered guests:
+                (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
+
               const cinYmd = normalizeCheckInYmd(g.guest);
               const nameKey = (name || "").trim().toLowerCase();
               const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
+
+              // Paid so far via indices: prefer exact (name::checkInYmd), then approximate aggregation
               let paidSoFar = 0;
               if (cinYmd) {
-              paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
+                paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
               }
-              // Fallback: use approx index by name + roomsKey + any payment date in range
               if (!paidSoFar) {
-              // Try aggregating all dates for that roomsKey signature if server didn’t backfill checkInYmd
-              let sum = 0;
-              for (const [k, v] of paymentsIndex.approx.entries()) {
-              const [nm, rk] = k.split("::");
-              if (nm === nameKey && rk === roomsKey) sum += v;
+                let sum = 0;
+                for (const [k, v] of paymentsIndex.approx.entries()) {
+                  const [nm, rk] = k.split("::");
+                  if (nm === nameKey && rk === roomsKey) sum += v;
+                }
+                paidSoFar = sum;
               }
-              paidSoFar = sum;
-              }
+
               return (
                 <div
                   key={idx}
@@ -380,8 +375,6 @@ return { exact, approx };
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
-
-                // Fixed 4 columns per floor for alignment and density
                 return (
                   <div key={floorNum} style={{ marginBottom: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
