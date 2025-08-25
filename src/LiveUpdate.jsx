@@ -11,7 +11,7 @@ import ExpensesPage from './liveupdate/ExpensesPage';
 const API_BASE =
 (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
 ? import.meta.env.VITE_MONGO_API_BASE
-: (window.MONGO_API_BASE || null);
+: (window.MONGO_API_BASE || '/api');
 
 const COLORS = {
   deep: '#2c3f34',

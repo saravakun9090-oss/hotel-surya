@@ -4,7 +4,7 @@
 const BUILD_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
   ? import.meta.env.VITE_MONGO_API_BASE
   : null;
-const API_BASE = BUILD_BASE || (window.__MONGO_API_BASE__ || ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) ? '/api' : null));
+const API_BASE = import.meta?.env?.VITE_MONGO_API_BASE ?? (typeof window !== 'undefined' ? (window.MONGO_API_BASE || window.MONGO_API_BASE) : undefined) ?? 'https://hotel-app-backend-2gxi.onrender.com/api'; 
 
 async function expectJson(res) {
   const contentType = res.headers.get('content-type') || '';
