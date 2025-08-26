@@ -25,17 +25,16 @@ let bucket;
 let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
-let checkinsCol;
-let reservationsCol;
+let checkinsCol;     // check-ins in MongoDB
+let reservationsCol; // reservations in MongoDB
 
-// Simple in-memory SSE clients registry
+// Simple in-memory SSE clients registry (currently used for rent & expenses)
 const sseClients = {
-  // eventName -> Set(res)
   rent: new Set(),
   expenses: new Set(),
 };
+
 function sseBroadcast(channel, payload) {
-  // channel is one of 'rent' | 'expenses'
   const set = sseClients[channel];
   if (!set) return;
   const data = `data: ${JSON.stringify(payload)}\n\n`;
@@ -43,7 +42,6 @@ function sseBroadcast(channel, payload) {
     try {
       res.write(data);
     } catch {
-      // drop dead connections
       try { res.end(); } catch {}
       set.delete(res);
     }
@@ -55,7 +53,7 @@ async function initDb() {
     console.error('[DB] Missing MONGO_URI env');
     return;
   }
-  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
+  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol && checkinsCol && reservationsCol) return;
 
   console.log('[DB] Connecting to Mongo...');
   dbClient = new MongoClient(MONGO_URI, {
@@ -70,23 +68,24 @@ async function initDb() {
   bucket = new GridFSBucket(db, { bucketName: 'uploads' });
 
   checkoutsCol    = db.collection('checkouts');
+  checkinsCol     = db.collection('checkins');
+  reservationsCol = db.collection('reservations');
   rentPaymentsCol = db.collection('rent_payments');
   expensesCol     = db.collection('expenses');
-checkinsCol = db.collection('checkins');
-reservationsCol = db.collection('reservations');
-await Promise.allSettled([
-checkinsCol.createIndex({ checkIn: -1 }),
-reservationsCol.createIndex({ date: -1 }),
-checkoutsCol.createIndex({ checkOutDateTime: -1 }),
-rentPaymentsCol.createIndex({ date: -1 }),
-expensesCol.createIndex({ date: -1 }),
-]);
+
+  await Promise.allSettled([
+    checkinsCol.createIndex({ checkIn: -1 }),
+    reservationsCol.createIndex({ date: -1 }),
+    checkoutsCol.createIndex({ checkOutDateTime: -1 }),
+    rentPaymentsCol.createIndex({ date: -1 }),
+    expensesCol.createIndex({ date: -1 }),
+  ]);
 
   console.log('[DB] Connected. Collections and indexes ready.');
 }
 
 async function ensureDb() {
-  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol) return;
+  if (dbClient && col && bucket && checkoutsCol && rentPaymentsCol && expensesCol && checkinsCol && reservationsCol) return;
   try {
     await initDb();
   } catch (e) {
@@ -116,7 +115,7 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
-// SSE endpoints (optional consumers)
+// SSE endpoints (optional)
 app.get('/api/sse/rent', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -124,7 +123,6 @@ app.get('/api/sse/rent', (req, res) => {
   res.flushHeaders?.();
 
   sseClients.rent.add(res);
-  // send a comment to keep connection open
   res.write(': connected to rent channel\n\n');
 
   req.on('close', () => {
@@ -188,7 +186,10 @@ app.get('/api/download/:id', async (req, res) => {
     await ensureDb();
     if (!bucket) return res.status(500).send('GridFS not initialized');
 
-    const _id = new ObjectId(String(req.params.id));
+    const idStr = String(req.params.id || '');
+    if (!ObjectId.isValid(idStr)) return res.status(400).send('Invalid id');
+
+    const _id = new ObjectId(idStr);
     const downloadStream = bucket.openDownloadStream(_id);
     downloadStream.on('error', (err) => {
       console.error('Download stream error:', err);
@@ -201,11 +202,24 @@ app.get('/api/download/:id', async (req, res) => {
   }
 });
 
+// Dedicated endpoint to fetch checkins directly from MongoDB (requested change)
+app.get('/api/checkins', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const docs = await checkinsCol.find({}).sort({ checkIn: -1 }).toArray();
+    res.json({ ok: true, checkins: docs.map(d => ({ id: d._id?.toString?.(), ...d })) });
+  } catch (e) {
+    console.error('GET /api/checkins failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Return combined state (includes id fields for items from Mongo)
 app.get('/api/state', async (req, res) => {
   try {
     await ensureDb();
-    if (!col || !checkoutsCol || !rentPaymentsCol || !expensesCol) {
+    if (!col || !checkoutsCol || !rentPaymentsCol || !expensesCol || !checkinsCol || !reservationsCol) {
       return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     }
 
@@ -213,16 +227,29 @@ app.get('/api/state', async (req, res) => {
     const baseState = doc?.state || {};
 
     const [checkinsRaw, reservationsRaw, checkoutsRaw, rentPaymentsRaw, expensesRaw] = await Promise.all([
-checkinsCol.find({}).sort({ checkIn: -1 }).toArray(),
-reservationsCol.find({}).sort({ date: -1 }).toArray(),
-checkoutsCol.find({}).sort({ checkOutDateTime: -1 }).toArray(),
-rentPaymentsCol.find({}).sort({ date: -1 }).toArray(),
-expensesCol.find({}).sort({ date: -1 }).toArray(),
-]);
+      checkinsCol.find({}).sort({ checkIn: -1 }).toArray(),
+      reservationsCol.find({}).sort({ date: -1 }).toArray(),
+      checkoutsCol.find({}).sort({ checkOutDateTime: -1 }).toArray(),
+      rentPaymentsCol.find({}).sort({ date: -1 }).toArray(),
+      expensesCol.find({}).sort({ date: -1 }).toArray(),
+    ]);
 
-const m = arr => arr.map(d => { const { _id, ...rest } = d||{}; return { id: _id?String(_id):undefined, ...rest }; });
-res.json({ ok:true, state: { ...baseState, checkins: m(checkinsRaw), reservations: m(reservationsRaw), checkouts: m(checkoutsRaw), rentPayments: m(rentPaymentsRaw), expenses: m(expensesRaw) } });
+    const m = arr => arr.map(d => {
+      const { _id, ...rest } = d || {};
+      return { id: _id ? String(_id) : undefined, ...rest };
+    });
 
+    res.json({
+      ok: true,
+      state: {
+        ...baseState,
+        checkins: m(checkinsRaw),
+        reservations: m(reservationsRaw),
+        checkouts: m(checkoutsRaw),
+        rentPayments: m(rentPaymentsRaw),
+        expenses: m(expensesRaw)
+      }
+    });
   } catch (e) {
     console.error('GET /api/state failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -326,7 +353,7 @@ app.delete('/api/rent-payment/:id', async (req, res) => {
   }
 });
 
-// Rent payment: remap all payments for a stay (name/rooms change)
+// Rent payment: remap
 app.post('/api/rent-payment/remap', async (req, res) => {
   try {
     await ensureDb();
@@ -337,7 +364,6 @@ app.post('/api/rent-payment/remap', async (req, res) => {
     if (sinceYmd) q.date = { $gte: String(sinceYmd).slice(0, 10) };
     if (fromName) q.name = String(fromName).trim();
     if (Array.isArray(fromRooms) && fromRooms.length) {
-      // match any overlap with paid rooms
       q.room = { $in: fromRooms.map(Number) };
     }
 
@@ -356,7 +382,7 @@ app.post('/api/rent-payment/remap', async (req, res) => {
   }
 });
 
-// Add an expense (returns inserted id)
+// Expense create
 app.post('/api/expense', async (req, res) => {
   try {
     await ensureDb();
@@ -371,8 +397,6 @@ app.post('/api/expense', async (req, res) => {
     };
 
     const result = await expensesCol.insertOne(doc);
-
-    // Notify listeners that expenses changed
     sseBroadcast('expenses', { action: 'created', id: String(result.insertedId) });
 
     res.json({ ok: true, id: String(result.insertedId) });
@@ -382,7 +406,7 @@ app.post('/api/expense', async (req, res) => {
   }
 });
 
-// Delete an expense + SSE notify
+// Expense delete
 app.delete('/api/expense/:id', async (req, res) => {
   try {
     await ensureDb();
@@ -395,7 +419,6 @@ app.delete('/api/expense/:id', async (req, res) => {
     const result = await expensesCol.deleteOne({ _id: new ObjectId(id) });
     if (result.deletedCount === 0) return res.status(404).json({ ok: false, error: 'not found' });
 
-    // Notify listeners that expenses changed
     sseBroadcast('expenses', { action: 'deleted', id });
 
     res.json({ ok: true });
@@ -405,69 +428,93 @@ app.delete('/api/expense/:id', async (req, res) => {
   }
 });
 
-app.post('/api/checkin', async (req, res) => { try {
-await ensureDb();
-if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const b = req.body || {};
-const rooms = Array.isArray(b.room) ? b.room.map(Number) : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
-const doc = {
-name: String(b.name || '').trim(),
-contact: String(b.contact || '').trim(),
-room: rooms,
-rate: Number(b.rate) || 0,
-checkInDate: b.checkInDate || null,
-checkInTime: b.checkInTime || null,
-checkIn: b.checkIn || new Date().toISOString(),
-createdAt: new Date().toISOString()
-};
-const r = await checkinsCol.insertOne(doc);
-sseBroadcast?.('checkin:update', { action: 'created', id: String(r.insertedId) });
-res.json({ ok: true, id: String(r.insertedId) });
-} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+// Check-in create (MongoDB checkins collection)
+app.post('/api/checkin', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const b = req.body || {};
+    const rooms = Array.isArray(b.room) ? b.room.map(Number) : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+    const doc = {
+      name: String(b.name || '').trim(),
+      contact: String(b.contact || '').trim(),
+      room: rooms,
+      rate: Number(b.rate) || 0,
+      checkInDate: b.checkInDate || null,
+      checkInTime: b.checkInTime || null,
+      checkIn: b.checkIn || new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    const r = await checkinsCol.insertOne(doc);
+    // Future: sseBroadcast('checkin', {...}) if adding client channel
+    res.json({ ok: true, id: String(r.insertedId) });
+  } catch (e) {
+    console.error('POST /api/checkin failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 
-app.delete('/api/checkin/:id', async (req, res) => { try {
-await ensureDb();
-if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const id = String(req.params.id || '');
-if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
-if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-sseBroadcast?.('checkin:update', { action: 'deleted', id });
-res.json({ ok: true });
-} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+// Check-in delete
+app.delete('/api/checkin/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const id = String(req.params.id || '');
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-app.post('/api/reservation', async (req, res) => { try {
-await ensureDb();
-if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const b = req.body || {};
-const doc = {
-name: String(b.name || '').trim(),
-place: String(b.place || '').trim(),
-room: Number(b.room) || 0,
-date: String(b.date || '').slice(0,10),
-createdAt: new Date().toISOString()
-};
-const r = await reservationsCol.insertOne(doc);
-sseBroadcast?.('reservations:update', { action: 'created', id: String(r.insertedId) });
-res.json({ ok: true, id: String(r.insertedId) });
-} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+    const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
+    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    // Future: sseBroadcast('checkin', {...}) if adding client channel
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/checkin/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 
+// Reservation create (MongoDB reservations collection)
+app.post('/api/reservation', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const b = req.body || {};
+    const doc = {
+      name: String(b.name || '').trim(),
+      place: String(b.place || '').trim(),
+      room: Number(b.room) || 0,
+      date: String(b.date || '').slice(0, 10),
+      createdAt: new Date().toISOString()
+    };
+    const r = await reservationsCol.insertOne(doc);
+    // Future: sseBroadcast('reservations', {...}) if adding client channel
+    res.json({ ok: true, id: String(r.insertedId) });
+  } catch (e) {
+    console.error('POST /api/reservation failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 
-app.delete('/api/reservation/:id', async (req, res) => { try {
-await ensureDb();
-if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-const id = String(req.params.id || '');
-if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
-if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-sseBroadcast?.('reservations:update', { action: 'deleted', id });
-res.json({ ok: true });
-} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
- 
+// Reservation delete
+app.delete('/api/reservation/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const id = String(req.params.id || '');
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
+    const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
+    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    // Future: sseBroadcast('reservations', {...}) if adding client channel
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/reservation/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 
-
-// Optional: record a checkout for LiveUpdate
+// Optional: record a checkout (MongoDB checkouts collection)
 app.post('/api/checkout', async (req, res) => {
   try {
     await ensureDb();

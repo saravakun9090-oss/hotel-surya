@@ -1,12 +1,15 @@
+// LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-// Resolve API base similarly to other modules
-const API_BASE =  `https://hotel-app-backend-2gxi.onrender.com/api`;
+// Resolve API base (fixed as per request)
+const API_BASE = `https://hotel-app-backend-2gxi.onrender.com/api`;
+
 const COLORS = {
   deep: '#2c3f34',
   cream: '#f7f5ee',
@@ -20,9 +23,11 @@ function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
   useEffect(() => {
     let mounted = true;
     let timer = null;
+
     const once = async () => {
       try {
         if (!url) throw new Error('No API URL configured');
@@ -42,15 +47,60 @@ function usePolling(url, interval = 2500) {
         setLoading(false);
       }
     };
+
     once();
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
+
   return { data, loading, error };
 }
 
-const PILL_COLOR = COLORS.btn;
+function useCheckins(apiBase, interval = 2500) {
+  const [checkins, setCheckins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
+  useEffect(() => {
+    let mounted = true;
+    let timer = null;
+
+    const once = async () => {
+      try {
+        const res = await fetch(`${apiBase}/checkins`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        const json = await res.json();
+        if (!mounted) return;
+        if (json.ok && Array.isArray(json.checkins)) {
+          // Sort most recent first
+          const sorted = json.checkins.slice().sort((a, b) => {
+            const ta = new Date(a.checkIn || a.checkInDate || 0).getTime();
+            const tb = new Date(b.checkIn || b.checkInDate || 0).getTime();
+            return tb - ta;
+          });
+          setCheckins(sorted);
+          setError(null);
+        } else {
+          setCheckins([]);
+          setError('Invalid checkins payload');
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setError(String(e));
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    once();
+    timer = setInterval(once, interval);
+    return () => { mounted = false; if (timer) clearInterval(timer); };
+  }, [apiBase, interval]);
+
+  return { checkins, loading, error };
+}
+
+const PILL_COLOR = COLORS.btn;
 const Pill = ({ to, active, children }) => (
   <Link
     to={to}
@@ -101,17 +151,31 @@ const roomBoxStyle = (r) => {
   return { ...base, background: '#ffffff' };
 };
 
-function normalizeCheckInYmd(guest) {
-  if (guest?.checkIn) return new Date(guest.checkIn).toISOString().slice(0, 10);
-  if (guest?.checkInDate) {
-    const d = guest.checkInDate;
+function normalizeCheckInYmdFromDoc(doc) {
+  if (doc?.checkIn) {
+    try { return new Date(doc.checkIn).toISOString().slice(0, 10); } catch { /* ignore */ }
+  }
+  if (doc?.checkInDate) {
+    const d = String(doc.checkInDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
     if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
       const [dd, mm, yyyy] = d.split('/');
       return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   }
   return '';
+}
+
+function roomsKeyOf(value) {
+  if (Array.isArray(value)) {
+    return value.slice().map(Number).filter(Boolean).sort((a, b) => a - b).join('_');
+  }
+  return String(value || '')
+    .split(',')
+    .map(s => Number(s.trim()))
+    .filter(Boolean)
+    .sort((a, b) => a - b)
+    .join('_');
 }
 
 export default function LiveUpdate() {
@@ -119,27 +183,20 @@ export default function LiveUpdate() {
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
-  // Backend-only state
+  // Poll combined state (reservations, checkouts, rentPayments, expenses, floors if present)
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Current Guests search
+  // Poll checkins directly from MongoDB checkins collection (authoritative for check-in state)
+  const { checkins, loading: checkinsLoading, error: checkinsError } = useCheckins(API_BASE, 2500);
+
+  // Search text for “Current Guests” list
   const [guestSearch, setGuestSearch] = useState('');
 
-  // Floors strictly from backend
+  // Floors (if backend supplies floors in the combined state)
   const floors = useMemo(() => {
     const f = remoteState?.floors;
     return (f && typeof f === 'object') ? f : {};
   }, [remoteState]);
-
-  const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
-
-  const serverState = remoteState || null;
-
-  const allRooms = useMemo(() => {
-    const arr = [];
-    for (const fl of Object.values(floors)) for (const r of fl) arr.push(r);
-    return arr.sort((a, b) => a.number - b.number);
-  }, [floors]);
 
   const roomsByFloor = useMemo(() => {
     const map = {};
@@ -149,72 +206,40 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
-  // Group occupied rooms by (guest.name + guest.checkIn/checkInDate) - legacy, can be replaced if you want to use checkins list directly
-  const occupiedGroups = useMemo(() => {
-    const map = new Map();
-    for (const r of allRooms) {
-      if (!r || r.status !== 'occupied' || !r.guest) continue;
-      const key = `${r.guest.name || ''}::${r.guest.checkIn || ''}`;
-      if (!map.has(key)) map.set(key, { guest: r.guest, rooms: [], checkIn: r.guest.checkIn || r.guest.checkInDate || '' });
-      map.get(key).rooms.push(r.number);
-    }
-    const list = Array.from(map.values()).map(x => ({
-      guest: x.guest,
-      rooms: x.rooms.sort((a, b) => a - b),
-      _checkInTs: x.checkIn ? new Date(x.checkIn).getTime() || 0 : 0
-    }));
-    list.sort((a, b) => b._checkInTs - a._checkInTs);
-    return list;
-  }, [allRooms]);
+  // Rent payments used to compute “paid till now”
+  const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
 
-  // Build a payments index: prefer exact match by (name, checkInYmd); else approximate by (name, roomsKey, paymentDate)
+  // Build a payments index: prefer exact (name + checkInYmd), else fall back by name+roomsKey across payment dates
   const paymentsIndex = useMemo(() => {
-    const exact = new Map();
-    const approx = new Map();
+    const exact = new Map();  // key: `${name}::${checkInYmd}`
+    const approx = new Map(); // key: `${name}::${roomsKey}`
     for (const p of rentPayments) {
       const amount = Number(p.amount) || 0;
       const name = (p.name || "").trim().toLowerCase();
       const cin = (p.checkInYmd || "").slice(0, 10);
-      const date = (p.date || "").slice(0, 10);
-      const roomsKey = Array.isArray(p.room)
-        ? p.room.slice().sort((a, b) => a - b).join("_")
-        : String(p.room || "")
-          .split(",")
-          .map(s => Number(s.trim()))
-          .filter(Boolean)
-          .sort((a, b) => a - b)
-          .join("_");
+      const rk = roomsKeyOf(p.room);
       if (name && cin) {
         const k = `${name}::${cin}`;
         exact.set(k, (exact.get(k) || 0) + amount);
-      } else if (name) {
-        const k2 = `${name}::${roomsKey}::${date}`;
+      } else if (name && rk) {
+        const k2 = `${name}::${rk}`;
         approx.set(k2, (approx.get(k2) || 0) + amount);
       }
     }
     return { exact, approx };
   }, [rentPayments]);
 
-  // NEW: Checkin data fetch - standardized to array from remoteState, sorted descending by checkInDateTime similar to checkout
-  const checkins = useMemo(() => {
-    const arr = (remoteState?.checkins || remoteState?.checkinsList || []).slice();
-    arr.sort((a, b) => {
-      const ta = new Date(a.checkInDateTime || a.checkInDate || 0).getTime();
-      const tb = new Date(b.checkInDateTime || b.checkInDate || 0).getTime();
-      return tb - ta;
-    });
-    return arr;
-  }, [remoteState]);
-
-  // Current Guests card - adapt as needed: currently uses occupiedGroups; can be updated to use checkins array if preferred
+  // Current Guests card (now driven directly by MongoDB checkins list)
   const currentGuestsCard = useMemo(() => {
-    const filtered = occupiedGroups.filter(g => {
+    // Filter by search
+    const filtered = (checkins || []).filter(ci => {
       const q = guestSearch.trim().toLowerCase();
       if (!q) return true;
-      const name = String(g.guest?.name || '').toLowerCase();
-      const rooms = (g.rooms || []).map(String).join(', ');
-      return name.includes(q) || rooms.includes(q);
+      const name = String(ci.name || '').toLowerCase();
+      const roomStr = Array.isArray(ci.room) ? ci.room.join(', ') : String(ci.room || '');
+      return name.includes(q) || roomStr.includes(q);
     });
+
     return (
       <div
         className="card"
@@ -229,8 +254,9 @@ export default function LiveUpdate() {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.deep }}>Current Guests</div>
-          <div style={{ fontSize: 13, color: COLORS.muted }}>{occupiedGroups.length} occupied</div>
+          <div style={{ fontSize: 13, color: COLORS.muted }}>{(checkins || []).length} occupied</div>
         </div>
+
         <div style={{ marginBottom: 10 }}>
           <input
             className="input"
@@ -246,31 +272,36 @@ export default function LiveUpdate() {
             onChange={(e) => setGuestSearch(e.target.value)}
           />
         </div>
-        {occupiedGroups.length === 0 && <div style={{ color: COLORS.muted }}>No rooms are occupied</div>}
+
+        {(!checkins || checkins.length === 0) && (
+          <div style={{ color: COLORS.muted }}>
+            {checkinsLoading ? 'Loading...' : (checkinsError ? `Error: ${checkinsError}` : 'No rooms are occupied')}
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-            {filtered.map((g, idx) => {
-              const name = g.guest?.name || 'Guest';
+            {filtered.map((ci, idx) => {
+              const name = ci.name || 'Guest';
               const initials =
                 (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-              const cinYmd = normalizeCheckInYmd(g.guest);
+
+              const cinYmd = normalizeCheckInYmdFromDoc(ci);
               const nameKey = (name || "").trim().toLowerCase();
-              const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
+              const rk = roomsKeyOf(ci.room);
+
+              // Paid-so-far lookup
               let paidSoFar = 0;
-              if (cinYmd) {
+              if (nameKey && cinYmd) {
                 paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
               }
-              if (!paidSoFar) {
-                let sum = 0;
-                for (const [k, v] of paymentsIndex.approx.entries()) {
-                  const [nm, rk] = k.split("::");
-                  if (nm === nameKey && rk === roomsKey) sum += v;
-                }
-                paidSoFar = sum;
+              if (!paidSoFar && nameKey && rk) {
+                paidSoFar = paymentsIndex.approx.get(`${nameKey}::${rk}`) || 0;
               }
+
               return (
                 <div
-                  key={idx}
+                  key={ci.id || idx}
                   className="card"
                   style={{
                     display: 'flex',
@@ -288,19 +319,25 @@ export default function LiveUpdate() {
                   }}>
                     {initials}
                   </div>
+
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
                         {name}
                       </div>
                       <div style={{ fontSize: 12, color: COLORS.muted }}>
-                        Room {(g.rooms || []).join(', ')}
+                        Room {Array.isArray(ci.room) ? ci.room.join(', ') : (ci.room || '—')}
                       </div>
                     </div>
+
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
-                      <div>Phone no: {g.guest?.contact || '—'}</div>
-                      <div>Price: ₹{g.guest?.rate || 0}/day</div>
-                      <div>In: {g.guest?.checkInDate || (g.guest?.checkIn ? new Date(g.guest.checkIn).toLocaleDateString() : '—')} {g.guest?.checkInTime || ''}</div>
+                      <div>Phone no: {ci.contact || '—'}</div>
+                      <div>Price: ₹{Number(ci.rate || 0)}/day</div>
+                      <div>
+                        In: {ci.checkInDate
+                              ? ci.checkInDate
+                              : (ci.checkIn ? new Date(ci.checkIn).toLocaleDateString() : '—')} {ci.checkInTime || ''}
+                      </div>
                       <div>Paid till now: ₹{paidSoFar}</div>
                     </div>
                   </div>
@@ -311,9 +348,9 @@ export default function LiveUpdate() {
         </div>
       </div>
     );
-  }, [occupiedGroups, guestSearch, paymentsIndex]);
+  }, [checkins, checkinsLoading, checkinsError, guestSearch, paymentsIndex]);
 
-  // NEW: checkout data fetch - memoized and sorted
+  // Checkout list (from combined state)
   const checkouts = useMemo(() => {
     const arr = (remoteState?.checkouts || remoteState?.checkoutsList || []).slice();
     arr.sort((a, b) => {
@@ -324,6 +361,7 @@ export default function LiveUpdate() {
     return arr;
   }, [remoteState]);
 
+  const serverState = remoteState || null;
   const sub = path.split('/').pop();
 
   const renderSubpage = () => {
@@ -348,6 +386,7 @@ export default function LiveUpdate() {
           </div>
         </div>
       )}
+
       <div className="flex flex-col md:flex-row gap-4">
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
@@ -368,6 +407,7 @@ export default function LiveUpdate() {
                 <div><span style={legendDot('#ffe3a6')} /> Reserved</div>
                 <div><span style={legendDot('#bfe8cb')} /> Occupied</div>
               </div>
+
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
@@ -401,6 +441,7 @@ export default function LiveUpdate() {
             </div>
           </div>
         )}
+
         <div className="flex-1">
           <div
             className="border rounded p-3 md:p-4"
@@ -415,8 +456,17 @@ export default function LiveUpdate() {
           </div>
         </div>
       </div>
-      {loading && <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>Loading...</div>}
-      {error && <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
+
+      {(loading || checkinsLoading) && (
+        <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>
+          Loading...
+        </div>
+      )}
+      {(error || checkinsError) && (
+        <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>
+          {error || checkinsError}
+        </div>
+      )}
     </div>
   );
 }
