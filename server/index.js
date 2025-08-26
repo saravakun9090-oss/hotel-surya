@@ -548,6 +548,44 @@ app.post('/api/checkout', async (req, res) => {
   }
 });
 
+// Check-in update
+app.put('/api/checkin/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const id = String(req.params.id || '');
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
+
+    const patch = {};
+    const b = req.body || {};
+
+    if (b.name !== undefined)     patch.name = String(b.name).trim();
+    if (b.contact !== undefined)  patch.contact = String(b.contact).trim();
+    if (b.room !== undefined) {
+      patch.room = Array.isArray(b.room)
+        ? b.room.map(Number)
+        : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+    }
+    if (b.rate !== undefined)       patch.rate = Number(b.rate) || 0;
+    if (b.checkInDate !== undefined) patch.checkInDate = String(b.checkInDate);
+    if (b.checkInTime !== undefined) patch.checkInTime = String(b.checkInTime);
+    if (b.checkIn !== undefined)     patch.checkIn = String(b.checkIn);
+
+    const r = await checkinsCol.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: patch }
+    );
+
+    if (!r.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
+
+    res.json({ ok: true, modified: r.modifiedCount });
+  } catch (e) {
+    console.error('PUT /api/checkin/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
