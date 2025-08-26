@@ -6,11 +6,7 @@ import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
 // Resolve API base similarly to other modules
-const API_BASE =
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
-    ? import.meta.env.VITE_MONGO_API_BASE
-    : (window.MONGO_API_BASE || '/api');
-
+const API_BASE =  `https://hotel-app-backend-2gxi.onrender.com/api`;
 const COLORS = {
   deep: '#2c3f34',
   cream: '#f7f5ee',
