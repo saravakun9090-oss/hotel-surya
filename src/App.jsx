@@ -2084,10 +2084,9 @@ try {
       // Mirror checkout to backend with complete details
       try {
         const API_BASE =
-    window.__MONGO_API_BASE__ ||
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-    '/api';
-
+          window.__MONGO_API_BASE__ ||
+          (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+          '/api';
 
         // Re-derive check-in fields for display (use guestCheckIn if available)
         let checkInDate = '';
@@ -2117,45 +2116,26 @@ try {
         const checkOutTime = now.toLocaleTimeString();
 
         await fetch(`${API_BASE}/checkout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: guestName || 'Guest',
-      room: roomsToCheckout,
-      contact: guestContact || '',
-      checkInDate,
-      checkInTime,
-      checkOutDate,
-      checkOutTime,
-      daysStayed: days,
-      totalRent,
-      totalPaid: totalPayment,
-      paymentTallyStatus: isTallied ? 'tallied' : 'not-tallied',
-      checkOutDateTime: now.toISOString()
-    })
-  });
-} catch (mirrorErr) {
-  console.warn('Remote checkout mirror failed:', mirrorErr);
-}
-
-// Also delete the active check-in doc from MongoDB (authoritative occupancy)
-try {
-  const checkInYmd = (guestCheckIn || new Date()).toISOString().slice(0,10);
-  const checkinId = await fetchCheckinId({
-    name: guestName || 'Guest',
-    room: roomsToCheckout,
-    checkInYmd
-  });
-  if (checkinId) {
-    await deleteCheckinById(checkinId);
-  } else {
-    // Optional: log if no match found; this prevents silent mismatch
-    console.warn('No matching check-in found to delete for', guestName, roomsToCheckout, checkInYmd);
-  }
-} catch (delErr) {
-  console.warn('Failed to delete check-in from Mongo:', delErr);
-}
-
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: guestName || 'Guest',
+            room: roomsToCheckout,
+            contact: guestContact || '',
+            checkInDate,
+            checkInTime,
+            checkOutDate,
+            checkOutTime,
+            daysStayed: days,
+            totalRent,
+            totalPaid: totalPayment,
+            paymentTallyStatus: isTallied ? 'tallied' : 'not-tallied',
+            checkOutDateTime: now.toISOString()
+          })
+        });
+      } catch (mirrorErr) {
+        console.warn('Remote checkout mirror failed:', mirrorErr);
+      }
     } catch (err) {
       console.error(err);
       showError(err?.message || "❌ Failed to complete check-out");
@@ -2364,48 +2344,6 @@ Tally: ${tallyStatus ? "✅" : "❌"}`
       </div>
     </div>
   );
-}
-
-
-async function fetchCheckinId({ name, room, checkInYmd }) {
-  // Query the server’s checkins list and try to match
-  const res = await fetch(`${API_BASE}/checkins`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Failed to load checkins: ${res.status}`);
-  const json = await res.json();
-  if (!json.ok || !Array.isArray(json.checkins)) return null;
-
-  const normName = String(name || '').trim().toLowerCase();
-  const targetRoom = Number(Array.isArray(room) ? room : room) || 0;
-
-  // Try exact match on name + contains room + same check-in ymd if available
-  const candidates = json.checkins.filter(ci => {
-    const nm = String(ci.name || '').trim().toLowerCase();
-    const rooms = Array.isArray(ci.room)
-      ? ci.room.map(Number)
-      : String(ci.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
-    const cin =
-      ci.checkIn
-        ? new Date(ci.checkIn).toISOString().slice(0,10)
-        : (ci.checkInDate || '');
-
-    const roomMatch = rooms.includes(targetRoom);
-    const nameMatch = nm === normName;
-    const dateMatch = checkInYmd ? (String(cin).slice(0,10) === String(checkInYmd).slice(0,10)) : true;
-
-    return roomMatch && nameMatch && dateMatch;
-  });
-
-  // Prefer the most recent if multiple
-  candidates.sort((a,b) => new Date(b.checkIn || b.checkInDate || 0) - new Date(a.checkIn || a.checkInDate || 0));
-  const hit = candidates;
-  return hit?.id || null;
-}
-
-async function deleteCheckinById(id) {
-  const res = await fetch(`${API_BASE}/checkins/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`Failed to delete checkin ${id}: ${res.status}`);
-  const json = await res.json();
-  if (!json.ok) throw new Error(`Delete checkin ${id} failed`);
 }
 
 
@@ -2939,10 +2877,6 @@ const checkInReservation = (res) => {
     </div>
   );
 }
-
-
-
-
 
 // --- Backend mirror helpers for LiveUpdate sync ---
 // Reuse the same API_BASE resolution pattern used elsewhere

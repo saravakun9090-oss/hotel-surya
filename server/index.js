@@ -454,24 +454,31 @@ app.post('/api/checkin', async (req, res) => {
   }
 });
 
-// Check-in delete
+// Check-in delete by Mongo _id (preferred)
 app.delete('/api/checkin/:id', async (req, res) => {
   try {
     await ensureDb();
     if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    const id = String(req.params.id || '');
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-    const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
-    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-    // Future: sseBroadcast('checkin', {...}) if adding client channel
-    res.json({ ok: true });
+    const raw = String(req.params.id || '').trim();
+    // Strict 24-hex check to avoid accidental "truthy" isValid matches
+    const is24Hex = /^[0-9a-fA-F]{24}$/.test(raw);
+    if (!raw) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!is24Hex) return res.status(400).json({ ok: false, error: 'invalid id' }); // prevents mismatched filter [7]
+
+    const _id = new ObjectId(raw);
+    const result = await checkinsCol.deleteOne({ _id }); // precise unique key [2]
+    // Add observability
+    console.log('[DELETE /api/checkin/:id] filter=%j deletedCount=%d', { _id }, result.deletedCount); // helps debug when 0 [1]
+
+    if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    return res.json({ ok: true });
   } catch (e) {
-    console.error('DELETE /api/checkins/:id failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    console.error('DELETE /api/checkin/:id failed:', e);
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // Reservation create (MongoDB reservations collection)
 app.post('/api/reservation', async (req, res) => {
