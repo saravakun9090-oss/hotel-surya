@@ -14,7 +14,7 @@ app.use(express.json());
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME || 'hotel_surya';
-const COLLECTION = process.env.COLLECTION || 'state';
+const COLLECTION = process.env.COLLECTION || 'app_state';
 const PORT = process.env.PORT || 4000;
 
 // Globals
