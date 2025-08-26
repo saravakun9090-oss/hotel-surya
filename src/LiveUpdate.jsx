@@ -1,17 +1,15 @@
-// LiveUpdate.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
 import ReservationsPage from './liveupdate/ReservationsPage';
 import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-// Resolve API base the same way other modules do
+// Resolve API base similarly to other modules
 const API_BASE =
-(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
-? import.meta.env.VITE_MONGO_API_BASE
-: (window.MONGO_API_BASE || '/api');
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE)
+    ? import.meta.env.VITE_MONGO_API_BASE
+    : (window.MONGO_API_BASE || '/api');
 
 const COLORS = {
   deep: '#2c3f34',
@@ -26,11 +24,9 @@ function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   useEffect(() => {
     let mounted = true;
     let timer = null;
-
     const once = async () => {
       try {
         if (!url) throw new Error('No API URL configured');
@@ -50,16 +46,15 @@ function usePolling(url, interval = 2500) {
         setLoading(false);
       }
     };
-
     once();
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
-
   return { data, loading, error };
 }
 
 const PILL_COLOR = COLORS.btn;
+
 const Pill = ({ to, active, children }) => (
   <Link
     to={to}
@@ -141,6 +136,7 @@ export default function LiveUpdate() {
   }, [remoteState]);
 
   const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
+
   const serverState = remoteState || null;
 
   const allRooms = useMemo(() => {
@@ -157,7 +153,7 @@ export default function LiveUpdate() {
     return map;
   }, [floors]);
 
-  // Group occupied rooms by (guest.name + guest.checkIn/checkInDate)
+  // Group occupied rooms by (guest.name + guest.checkIn/checkInDate) - legacy, can be replaced if you want to use checkins list directly
   const occupiedGroups = useMemo(() => {
     const map = new Map();
     for (const r of allRooms) {
@@ -184,16 +180,14 @@ export default function LiveUpdate() {
       const name = (p.name || "").trim().toLowerCase();
       const cin = (p.checkInYmd || "").slice(0, 10);
       const date = (p.date || "").slice(0, 10);
-
       const roomsKey = Array.isArray(p.room)
         ? p.room.slice().sort((a, b) => a - b).join("_")
         : String(p.room || "")
-            .split(",")
-            .map(s => Number(s.trim()))
-            .filter(Boolean)
-            .sort((a, b) => a - b)
-            .join("_");
-
+          .split(",")
+          .map(s => Number(s.trim()))
+          .filter(Boolean)
+          .sort((a, b) => a - b)
+          .join("_");
       if (name && cin) {
         const k = `${name}::${cin}`;
         exact.set(k, (exact.get(k) || 0) + amount);
@@ -205,7 +199,18 @@ export default function LiveUpdate() {
     return { exact, approx };
   }, [rentPayments]);
 
-  // Current Guests card
+  // NEW: Checkin data fetch - standardized to array from remoteState, sorted descending by checkInDateTime similar to checkout
+  const checkins = useMemo(() => {
+    const arr = (remoteState?.checkins || remoteState?.checkinsList || []).slice();
+    arr.sort((a, b) => {
+      const ta = new Date(a.checkInDateTime || a.checkInDate || 0).getTime();
+      const tb = new Date(b.checkInDateTime || b.checkInDate || 0).getTime();
+      return tb - ta;
+    });
+    return arr;
+  }, [remoteState]);
+
+  // Current Guests card - adapt as needed: currently uses occupiedGroups; can be updated to use checkins array if preferred
   const currentGuestsCard = useMemo(() => {
     const filtered = occupiedGroups.filter(g => {
       const q = guestSearch.trim().toLowerCase();
@@ -214,7 +219,6 @@ export default function LiveUpdate() {
       const rooms = (g.rooms || []).map(String).join(', ');
       return name.includes(q) || rooms.includes(q);
     });
-
     return (
       <div
         className="card"
@@ -231,7 +235,6 @@ export default function LiveUpdate() {
           <div style={{ fontWeight: 900, fontSize: 16, color: COLORS.deep }}>Current Guests</div>
           <div style={{ fontSize: 13, color: COLORS.muted }}>{occupiedGroups.length} occupied</div>
         </div>
-
         <div style={{ marginBottom: 10 }}>
           <input
             className="input"
@@ -247,20 +250,16 @@ export default function LiveUpdate() {
             onChange={(e) => setGuestSearch(e.target.value)}
           />
         </div>
-
         {occupiedGroups.length === 0 && <div style={{ color: COLORS.muted }}>No rooms are occupied</div>}
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
             {filtered.map((g, idx) => {
               const name = g.guest?.name || 'Guest';
               const initials =
                 (String(name).split(' ').map(n => n).filter(Boolean).slice(0, 2).join('') || name.slice(0, 2)).toUpperCase();
-
               const cinYmd = normalizeCheckInYmd(g.guest);
               const nameKey = (name || "").trim().toLowerCase();
               const roomsKey = (g.rooms || []).slice().sort((a,b)=>a-b).join("_");
-
               let paidSoFar = 0;
               if (cinYmd) {
                 paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
@@ -273,7 +272,6 @@ export default function LiveUpdate() {
                 }
                 paidSoFar = sum;
               }
-
               return (
                 <div
                   key={idx}
@@ -294,7 +292,6 @@ export default function LiveUpdate() {
                   }}>
                     {initials}
                   </div>
-
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: COLORS.deep }}>
@@ -304,7 +301,6 @@ export default function LiveUpdate() {
                         Room {(g.rooms || []).join(', ')}
                       </div>
                     </div>
-
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 8, fontSize: 12, color: COLORS.deep }}>
                       <div>Phone no: {g.guest?.contact || '—'}</div>
                       <div>Price: ₹{g.guest?.rate || 0}/day</div>
@@ -321,11 +317,22 @@ export default function LiveUpdate() {
     );
   }, [occupiedGroups, guestSearch, paymentsIndex]);
 
+  // NEW: checkout data fetch - memoized and sorted
+  const checkouts = useMemo(() => {
+    const arr = (remoteState?.checkouts || remoteState?.checkoutsList || []).slice();
+    arr.sort((a, b) => {
+      const ta = new Date(a.checkOutDateTime || a.checkOutDate || 0).getTime();
+      const tb = new Date(b.checkOutDateTime || b.checkOutDate || 0).getTime();
+      return tb - ta;
+    });
+    return arr;
+  }, [remoteState]);
+
   const sub = path.split('/').pop();
 
   const renderSubpage = () => {
     if (sub === 'reservations') return <ReservationsPage data={serverState} />;
-    if (sub === 'checkout') return <CheckoutPage data={serverState} />;
+    if (sub === 'checkout') return <CheckoutPage data={{ checkoutsList: checkouts }} />;
     if (sub === 'rentpayment') return <RentPaymentPage data={serverState} />;
     if (sub === 'expenses') return <ExpensesPage data={serverState} />;
     return null;
@@ -345,7 +352,6 @@ export default function LiveUpdate() {
           </div>
         </div>
       )}
-
       <div className="flex flex-col md:flex-row gap-4">
         {isRootLiveUpdate && (
           <div style={{ flex: 1, minWidth: 280 }}>
@@ -361,13 +367,11 @@ export default function LiveUpdate() {
               }}
             >
               <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.deep }}>Room Layout (Today)</div>
-
               <div style={{ display: 'flex', gap: 10, fontSize: 12, color: COLORS.muted, marginBottom: 6, flexWrap: 'wrap' }}>
                 <div><span style={legendDot('#ffffff')} /> Free</div>
                 <div><span style={legendDot('#ffe3a6')} /> Reserved</div>
                 <div><span style={legendDot('#bfe8cb')} /> Occupied</div>
               </div>
-
               {Object.keys(roomsByFloor).map(floorNum => {
                 const list = roomsByFloor[floorNum];
                 if (!list || list.length === 0) return null;
@@ -385,8 +389,8 @@ export default function LiveUpdate() {
                             r.status === 'reserved'
                               ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
                               : r.status === 'occupied'
-                              ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                              : 'Free'
+                                ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                                : 'Free'
                           }
                         >
                           <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
@@ -401,7 +405,6 @@ export default function LiveUpdate() {
             </div>
           </div>
         )}
-
         <div className="flex-1">
           <div
             className="border rounded p-3 md:p-4"
@@ -416,7 +419,6 @@ export default function LiveUpdate() {
           </div>
         </div>
       </div>
-
       {loading && <div className="text-sm" style={{ color: COLORS.muted, marginTop: 8 }}>Loading...</div>}
       {error && <div className="text-sm" style={{ color: '#b91c1c', marginTop: 8 }}>{error}</div>}
     </div>
