@@ -25,6 +25,8 @@ let bucket;
 let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
+let checkinsCol;
+let reservationsCol;
 
 // Simple in-memory SSE clients registry
 const sseClients = {
@@ -70,12 +72,15 @@ async function initDb() {
   checkoutsCol    = db.collection('checkouts');
   rentPaymentsCol = db.collection('rent_payments');
   expensesCol     = db.collection('expenses');
-
-  await Promise.allSettled([
-    checkoutsCol.createIndex({ checkOutDateTime: -1 }),
-    rentPaymentsCol.createIndex({ date: -1 }),
-    expensesCol.createIndex({ date: -1 }),
-  ]);
+checkinsCol = db.collection('checkins');
+reservationsCol = db.collection('reservations');
+await Promise.allSettled([
+checkinsCol.createIndex({ checkIn: -1 }),
+reservationsCol.createIndex({ date: -1 }),
+checkoutsCol.createIndex({ checkOutDateTime: -1 }),
+rentPaymentsCol.createIndex({ date: -1 }),
+expensesCol.createIndex({ date: -1 }),
+]);
 
   console.log('[DB] Connected. Collections and indexes ready.');
 }
@@ -207,30 +212,17 @@ app.get('/api/state', async (req, res) => {
     const doc = await col.findOne({ _id: 'singleton' });
     const baseState = doc?.state || {};
 
-    const [checkoutsRaw, rentPaymentsRaw, expensesRaw] = await Promise.all([
-      checkoutsCol.find({}).sort({ checkOutDateTime: -1 }).toArray(),
-      rentPaymentsCol.find({}).sort({ date: -1 }).toArray(),
-      expensesCol.find({}).sort({ date: -1 }).toArray(),
-    ]);
+    const [checkinsRaw, reservationsRaw, checkoutsRaw, rentPaymentsRaw, expensesRaw] = await Promise.all([
+checkinsCol.find({}).sort({ checkIn: -1 }).toArray(),
+reservationsCol.find({}).sort({ date: -1 }).toArray(),
+checkoutsCol.find({}).sort({ checkOutDateTime: -1 }).toArray(),
+rentPaymentsCol.find({}).sort({ date: -1 }).toArray(),
+expensesCol.find({}).sort({ date: -1 }).toArray(),
+]);
 
-    const mapWithId = (arr) => (Array.isArray(arr) ? arr : []).map(d => {
-      const { _id, ...rest } = d || {};
-      return { id: _id ? String(_id) : undefined, ...rest };
-    });
+const m = arr => arr.map(d => { const { _id, ...rest } = d||{}; return { id: _id?String(_id):undefined, ...rest }; });
+res.json({ ok:true, state: { ...baseState, checkins: m(checkinsRaw), reservations: m(reservationsRaw), checkouts: m(checkoutsRaw), rentPayments: m(rentPaymentsRaw), expenses: m(expensesRaw) } });
 
-    const checkouts = mapWithId(checkoutsRaw);
-    const rentPayments = mapWithId(rentPaymentsRaw);
-    const expenses = mapWithId(expensesRaw);
-
-    res.json({
-      ok: true,
-      state: {
-        ...baseState,
-        checkouts,
-        rentPayments,
-        expenses
-      }
-    });
   } catch (e) {
     console.error('GET /api/state failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -412,6 +404,68 @@ app.delete('/api/expense/:id', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+app.post('/api/checkin', async (req, res) => { try {
+await ensureDb();
+if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const b = req.body || {};
+const rooms = Array.isArray(b.room) ? b.room.map(Number) : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+const doc = {
+name: String(b.name || '').trim(),
+contact: String(b.contact || '').trim(),
+room: rooms,
+rate: Number(b.rate) || 0,
+checkInDate: b.checkInDate || null,
+checkInTime: b.checkInTime || null,
+checkIn: b.checkIn || new Date().toISOString(),
+createdAt: new Date().toISOString()
+};
+const r = await checkinsCol.insertOne(doc);
+sseBroadcast?.('checkin:update', { action: 'created', id: String(r.insertedId) });
+res.json({ ok: true, id: String(r.insertedId) });
+} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+
+app.delete('/api/checkin/:id', async (req, res) => { try {
+await ensureDb();
+if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const id = String(req.params.id || '');
+if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
+if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+sseBroadcast?.('checkin:update', { action: 'deleted', id });
+res.json({ ok: true });
+} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+
+app.post('/api/reservation', async (req, res) => { try {
+await ensureDb();
+if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const b = req.body || {};
+const doc = {
+name: String(b.name || '').trim(),
+place: String(b.place || '').trim(),
+room: Number(b.room) || 0,
+date: String(b.date || '').slice(0,10),
+createdAt: new Date().toISOString()
+};
+const r = await reservationsCol.insertOne(doc);
+sseBroadcast?.('reservations:update', { action: 'created', id: String(r.insertedId) });
+res.json({ ok: true, id: String(r.insertedId) });
+} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+
+
+app.delete('/api/reservation/:id', async (req, res) => { try {
+await ensureDb();
+if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+const id = String(req.params.id || '');
+if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
+if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+sseBroadcast?.('reservations:update', { action: 'deleted', id });
+res.json({ ok: true });
+} catch (e) { res.status(500).json({ ok: false, error: String(e) }); } });
+ 
+
+
 
 // Optional: record a checkout for LiveUpdate
 app.post('/api/checkout', async (req, res) => {
