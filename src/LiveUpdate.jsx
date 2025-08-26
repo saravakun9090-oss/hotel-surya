@@ -7,7 +7,7 @@ import CheckoutPage from './liveupdate/CheckoutPage';
 import RentPaymentPage from './liveupdate/RentPaymentPage';
 import ExpensesPage from './liveupdate/ExpensesPage';
 
-// Resolve API base (fixed as per request)
+// Fixed API base from your snippet
 const API_BASE = `https://hotel-app-backend-2gxi.onrender.com/api`;
 
 const COLORS = {
@@ -23,11 +23,9 @@ function usePolling(url, interval = 2500) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   useEffect(() => {
     let mounted = true;
     let timer = null;
-
     const once = async () => {
       try {
         if (!url) throw new Error('No API URL configured');
@@ -47,24 +45,21 @@ function usePolling(url, interval = 2500) {
         setLoading(false);
       }
     };
-
     once();
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [url, interval]);
-
   return { data, loading, error };
 }
 
+// Poll checkins directly from Mongo
 function useCheckins(apiBase, interval = 2500) {
   const [checkins, setCheckins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   useEffect(() => {
     let mounted = true;
     let timer = null;
-
     const once = async () => {
       try {
         const res = await fetch(`${apiBase}/checkins`, { cache: 'no-store' });
@@ -72,7 +67,6 @@ function useCheckins(apiBase, interval = 2500) {
         const json = await res.json();
         if (!mounted) return;
         if (json.ok && Array.isArray(json.checkins)) {
-          // Sort most recent first
           const sorted = json.checkins.slice().sort((a, b) => {
             const ta = new Date(a.checkIn || a.checkInDate || 0).getTime();
             const tb = new Date(b.checkIn || b.checkInDate || 0).getTime();
@@ -91,12 +85,10 @@ function useCheckins(apiBase, interval = 2500) {
         if (mounted) setLoading(false);
       }
     };
-
     once();
     timer = setInterval(once, interval);
     return () => { mounted = false; if (timer) clearInterval(timer); };
   }, [apiBase, interval]);
-
   return { checkins, loading, error };
 }
 
@@ -131,7 +123,7 @@ const legendDot = (bg) => ({
   border: '1px solid rgba(0,0,0,0.08)'
 });
 
-const roomBoxStyle = (r) => {
+const roomBoxStyle = (status) => {
   const base = {
     display: 'flex',
     alignItems: 'center',
@@ -144,16 +136,17 @@ const roomBoxStyle = (r) => {
     border: '1px solid rgba(0,0,0,0.14)',
     userSelect: 'none',
     boxShadow: '0 1px 1px rgba(0,0,0,0.04)',
-    color: COLORS.deep
+    color: COLORS.deep,
+    background: '#ffffff'
   };
-  if (r.status === 'occupied') return { ...base, background: '#bfe8cb' };
-  if (r.status === 'reserved') return { ...base, background: '#ffe3a6' };
-  return { ...base, background: '#ffffff' };
+  if (status === 'occupied') return { ...base, background: '#bfe8cb' };
+  if (status === 'reserved') return { ...base, background: '#ffe3a6' };
+  return base;
 };
 
 function normalizeCheckInYmdFromDoc(doc) {
   if (doc?.checkIn) {
-    try { return new Date(doc.checkIn).toISOString().slice(0, 10); } catch { /* ignore */ }
+    try { return new Date(doc.checkIn).toISOString().slice(0, 10); } catch {}
   }
   if (doc?.checkInDate) {
     const d = String(doc.checkInDate);
@@ -183,36 +176,56 @@ export default function LiveUpdate() {
   const path = loc.pathname;
   const isRootLiveUpdate = path === '/liveupdate' || path === '/liveupdate/';
 
-  // Poll combined state (reservations, checkouts, rentPayments, expenses, floors if present)
+  // Combined state (reservations, checkouts, rentPayments, expenses, floors if provided)
   const { data: remoteState, loading, error } = usePolling(`${API_BASE}/state`, 2500);
 
-  // Poll checkins directly from MongoDB checkins collection (authoritative for check-in state)
+  // Mongo checkins used as the single source of truth for occupancy
   const { checkins, loading: checkinsLoading, error: checkinsError } = useCheckins(API_BASE, 2500);
 
-  // Search text for “Current Guests” list
+  // Search for Current Guests
   const [guestSearch, setGuestSearch] = useState('');
 
-  // Floors (if backend supplies floors in the combined state)
+  // Floors (optional; used purely for the grid layout)
   const floors = useMemo(() => {
     const f = remoteState?.floors;
     return (f && typeof f === 'object') ? f : {};
   }, [remoteState]);
 
-  const roomsByFloor = useMemo(() => {
-    const map = {};
-    for (const [fnum, list] of Object.entries(floors)) {
-      map[fnum] = (Array.isArray(list) ? list : []).slice().sort((a, b) => a.number - b.number);
+  // Reservations (for reserved overlay if a room is not occupied)
+  const reservations = useMemo(() => {
+    return remoteState?.reservations || [];
+  }, [remoteState]);
+
+  // Build occupiedRooms from checkins
+  const occupiedRooms = useMemo(() => {
+    const set = new Set();
+    for (const ci of checkins || []) {
+      const rooms = Array.isArray(ci.room)
+        ? ci.room
+        : String(ci.room || '')
+          .split(',')
+          .map(s => Number(s.trim()))
+          .filter(Boolean);
+      for (const r of rooms) set.add(Number(r));
     }
-    return map;
-  }, [floors]);
+    return set;
+  }, [checkins]);
 
-  // Rent payments used to compute “paid till now”
+  // Build reservedRooms from reservations (if reservation has room number(s))
+  const reservedRooms = useMemo(() => {
+    const set = new Set();
+    for (const rv of reservations || []) {
+      const r = Number(rv.room) || 0;
+      if (r) set.add(r);
+    }
+    return set;
+  }, [reservations]);
+
+  // Rent payments for “Paid till now”
   const rentPayments = remoteState?.rentPayments || remoteState?.rent_payments || [];
-
-  // Build a payments index: prefer exact (name + checkInYmd), else fall back by name+roomsKey across payment dates
   const paymentsIndex = useMemo(() => {
-    const exact = new Map();  // key: `${name}::${checkInYmd}`
-    const approx = new Map(); // key: `${name}::${roomsKey}`
+    const exact = new Map();  // `${name}::${checkInYmd}`
+    const approx = new Map(); // `${name}::${roomsKey}`
     for (const p of rentPayments) {
       const amount = Number(p.amount) || 0;
       const name = (p.name || "").trim().toLowerCase();
@@ -229,9 +242,8 @@ export default function LiveUpdate() {
     return { exact, approx };
   }, [rentPayments]);
 
-  // Current Guests card (now driven directly by MongoDB checkins list)
+  // Current Guests card (driven by checkins)
   const currentGuestsCard = useMemo(() => {
-    // Filter by search
     const filtered = (checkins || []).filter(ci => {
       const q = guestSearch.trim().toLowerCase();
       if (!q) return true;
@@ -290,7 +302,6 @@ export default function LiveUpdate() {
               const nameKey = (name || "").trim().toLowerCase();
               const rk = roomsKeyOf(ci.room);
 
-              // Paid-so-far lookup
               let paidSoFar = 0;
               if (nameKey && cinYmd) {
                 paidSoFar = paymentsIndex.exact.get(`${nameKey}::${cinYmd}`) || 0;
@@ -350,7 +361,51 @@ export default function LiveUpdate() {
     );
   }, [checkins, checkinsLoading, checkinsError, guestSearch, paymentsIndex]);
 
-  // Checkout list (from combined state)
+  // Derive room grid data by overlaying occupied/reserved statuses
+  const roomsByFloor = useMemo(() => {
+    const out = {};
+    for (const [fnum, list] of Object.entries(floors)) {
+      const sorted = (Array.isArray(list) ? list : []).slice().sort((a, b) => a.number - b.number);
+      out[fnum] = sorted.map(r => {
+        const roomNo = Number(r.number);
+        const isOccupied = occupiedRooms.has(roomNo);
+        const isReserved = !isOccupied && reservedRooms.has(roomNo);
+        const status = isOccupied ? 'occupied' : (isReserved ? 'reserved' : 'free');
+
+        // Tooltip info from checkins or reservation if available
+        let title = 'Free';
+        if (status === 'reserved') {
+          title = `Reserved`;
+        }
+        if (status === 'occupied') {
+          // Try to find a checkin doc that includes this room
+          const match = (checkins || []).find(ci => {
+            const rooms = Array.isArray(ci.room)
+              ? ci.room
+              : String(ci.room || '')
+                  .split(',')
+                  .map(s => Number(s.trim()))
+                  .filter(Boolean);
+            return rooms.includes(roomNo);
+          });
+          const gname = match?.name || 'Guest';
+          const contact = match?.contact || '-';
+          const cdate = match?.checkInDate || (match?.checkIn ? new Date(match.checkIn).toLocaleDateString() : '-');
+          const ctime = match?.checkInTime || '';
+          title = `Occupied by: ${gname}\nContact: ${contact}\nCheck-in: ${cdate} ${ctime}`;
+        }
+
+        return {
+          ...r,
+          status,
+          _title: title
+        };
+      });
+    }
+    return out;
+  }, [floors, occupiedRooms, reservedRooms, checkins]);
+
+  // Checkout list
   const checkouts = useMemo(() => {
     const arr = (remoteState?.checkouts || remoteState?.checkoutsList || []).slice();
     arr.sort((a, b) => {
@@ -420,14 +475,8 @@ export default function LiveUpdate() {
                       {list.map(r => (
                         <div
                           key={r.number}
-                          style={roomBoxStyle(r)}
-                          title={
-                            r.status === 'reserved'
-                              ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                              : r.status === 'occupied'
-                                ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                                : 'Free'
-                          }
+                          style={roomBoxStyle(r.status)}
+                          title={r._title}
                         >
                           <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' }}>
                             {String(r.number).padStart(2, '0')}
