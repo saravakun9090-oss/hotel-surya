@@ -528,19 +528,15 @@ app.post('/api/checkout', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    // Insert into checkouts collection
+    // Insert checkout record
     const result = await checkoutsCol.insertOne(doc);
 
-    // --- Delete from checkins ---
-    // If frontend sends `checkinId`, prefer that
+    // --- Delete the checkin by _id ---
     if (body.checkinId && ObjectId.isValid(body.checkinId)) {
-      await checkinsCol.deleteOne({ _id: new ObjectId(body.checkinId) });
-    } else if (body.name && body.room) {
-      // fallback: try delete by guest name and room
-      await checkinsCol.deleteOne({
-        name: String(body.name).trim(),
-        room: { $in: (Array.isArray(body.room) ? body.room : [Number(body.room)]) }
-      });
+      const delResult = await checkinsCol.deleteOne({ _id: new ObjectId(body.checkinId) });
+      console.log("Deleted checkin:", delResult.deletedCount);
+    } else {
+      console.warn("Checkout received without valid checkinId, cannot delete checkin");
     }
 
     res.json({ ok: true, id: String(result.insertedId) });
@@ -549,6 +545,7 @@ app.post('/api/checkout', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
