@@ -2119,7 +2119,6 @@ try {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            checkinId: guest.id,
             name: guestName || 'Guest',
             room: roomsToCheckout,
             contact: guestContact || '',
