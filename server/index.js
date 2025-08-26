@@ -468,7 +468,7 @@ app.delete('/api/checkin/:id', async (req, res) => {
     // Future: sseBroadcast('checkin', {...}) if adding client channel
     res.json({ ok: true });
   } catch (e) {
-    console.error('DELETE /api/checkin/:id failed:', e);
+    console.error('DELETE /api/checkins/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
