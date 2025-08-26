@@ -514,38 +514,24 @@ app.delete('/api/reservation/:id', async (req, res) => {
   }
 });
 
+// Optional: record a checkout (MongoDB checkouts collection)
 app.post('/api/checkout', async (req, res) => {
   try {
     await ensureDb();
-    if (!checkoutsCol || !checkinsCol) {
-      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    }
+    if (!checkoutsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
     const body = req.body || {};
     const doc = {
       ...body,
-      checkOutDateTime: new Date().toISOString(),
       createdAt: new Date().toISOString()
     };
-
-    // Insert checkout record
-    const result = await checkoutsCol.insertOne(doc);
-
-    // --- Delete the checkin by _id ---
-    if (body.checkinId && ObjectId.isValid(body.checkinId)) {
-      const delResult = await checkinsCol.deleteOne({ _id: new ObjectId(body.checkinId) });
-      console.log("Deleted checkin:", delResult.deletedCount);
-    } else {
-      console.warn("Checkout received without valid checkinId, cannot delete checkin");
-    }
-
-    res.json({ ok: true, id: String(result.insertedId) });
+    await checkoutsCol.insertOne(doc);
+    res.json({ ok: true });
   } catch (e) {
     console.error('POST /api/checkout failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
-
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
