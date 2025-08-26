@@ -654,13 +654,15 @@ async function saveEditChanges() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: editNameInput,
-        contact: editGuest.guest.contact,   // keep contact unless edited separately
-        room: newRooms,
-        rate: Number(editRateInput) || 0,
-        checkInDate: editGuest.guest.checkInDate,
-        checkInTime: editGuest.guest.checkInTime,
-        checkIn: editGuest.guest.checkIn
+        // identify original checkin
+    name: editGuest.guest.name,
+    room: origRooms,
+    checkInDate: editGuest.guest.checkInDate,
+    // update values
+    newName: editNameInput,
+    contact: editGuest.guest.contact,
+    room: newRooms,
+    rate: Number(editRateInput) || 0
       })
     });
   } catch (err) {
