@@ -454,87 +454,24 @@ app.post('/api/checkin', async (req, res) => {
   }
 });
 
-
-
-// Atomic checkout: optionally by id; otherwise by fields (name + room + optional checkInYmd)
-app.post('/api/checkout-and-delete', async (req, res) => {
+// Check-in delete
+app.delete('/api/checkin/:id', async (req, res) => {
   try {
     await ensureDb();
-    if (!checkinsCol || !checkoutsCol) {
-      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    }
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    const id = String(req.params.id || '');
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-    const {
-      // for writing checkout summary
-      checkoutDoc,
-      // preferred direct id deletion
-      checkinId,
-      // fallback match keys if id not provided
-      name,
-      room,
-      checkInYmd
-    } = req.body || {};
-
-    // 1) Find the check-in doc
-    let doc = null;
-
-    if (checkinId && /^[0-9a-fA-F]{24}$/.test(String(checkinId))) {
-      doc = await checkinsCol.findOne({ _id: new ObjectId(String(checkinId)) });
-    } else {
-      const nm = String(name || '').trim();
-      const rm = Number(Array.isArray(room) ? room : room) || 0;
-
-      if (!nm || !rm) {
-        return res.status(400).json({ ok: false, error: 'name and room are required when checkinId is not provided' });
-      }
-
-      const filter = {
-        name: { $regex: `^${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
-        $expr: {
-          $in: [
-            rm,
-            { $map: { input: { $ifNull: ['$room', []] }, as: 'r', in: { $toInt: '$$r' } } }
-          ]
-        }
-      };
-
-      if (checkInYmd) {
-        const ymd = String(checkInYmd).slice(0, 10);
-        filter.$or = [
-          { checkIn: { $gte: new Date(ymd + 'T00:00:00.000Z'), $lt: new Date(ymd + 'T23:59:59.999Z') } },
-          { checkInDate: ymd }
-        ];
-      }
-
-      doc = await checkinsCol
-        .find(filter, { projection: { _id: 1, name: 1, room: 1, checkIn: 1, checkInDate: 1 } })
-        .sort({ checkIn: -1, _id: -1 })
-        .limit(1)
-        .next();
-    }
-
-    if (!doc?._id) return res.status(404).json({ ok: false, error: 'check-in not found' });
-
-    // 2) Insert checkout record (if provided)
-    if (checkoutDoc && typeof checkoutDoc === 'object') {
-      await checkoutsCol.insertOne({
-        ...checkoutDoc,
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    // 3) Delete check-in by id
-    const del = await checkinsCol.deleteOne({ _id: doc._id });
-
-    return res.json({ ok: true, deletedId: String(doc._id), deletedCount: del.deletedCount || 0 });
+    const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
+    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    // Future: sseBroadcast('checkin', {...}) if adding client channel
+    res.json({ ok: true });
   } catch (e) {
-    console.error('POST /api/checkout-and-delete failed:', e);
-    return res.status(500).json({ ok: false, error: String(e) });
+    console.error('DELETE /api/checkin/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
   }
 });
-
-
-
 
 // Reservation create (MongoDB reservations collection)
 app.post('/api/reservation', async (req, res) => {
@@ -577,7 +514,41 @@ app.delete('/api/reservation/:id', async (req, res) => {
   }
 });
 
+app.post('/api/checkout', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkoutsCol || !checkinsCol) {
+      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    }
 
+    const body = req.body || {};
+    const doc = {
+      ...body,
+      checkOutDateTime: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+
+    // Insert into checkouts collection
+    const result = await checkoutsCol.insertOne(doc);
+
+    // --- Delete from checkins ---
+    // If frontend sends `checkinId`, prefer that
+    if (body.checkinId && ObjectId.isValid(body.checkinId)) {
+      await checkinsCol.deleteOne({ _id: new ObjectId(body.checkinId) });
+    } else if (body.name && body.room) {
+      // fallback: try delete by guest name and room
+      await checkinsCol.deleteOne({
+        name: String(body.name).trim(),
+        room: { $in: (Array.isArray(body.room) ? body.room : [Number(body.room)]) }
+      });
+    }
+
+    res.json({ ok: true, id: String(result.insertedId) });
+  } catch (e) {
+    console.error('POST /api/checkout failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });
