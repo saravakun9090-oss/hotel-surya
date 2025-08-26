@@ -2402,7 +2402,7 @@ async function fetchCheckinId({ name, room, checkInYmd }) {
 }
 
 async function deleteCheckinById(id) {
-  const res = await fetch(`${API_BASE}/checkin/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_BASE}/checkins/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to delete checkin ${id}: ${res.status}`);
   const json = await res.json();
   if (!json.ok) throw new Error(`Delete checkin ${id} failed`);
