@@ -454,30 +454,56 @@ app.post('/api/checkin', async (req, res) => {
   }
 });
 
-// Check-in delete by Mongo _id (preferred)
-app.delete('/api/checkin/:id', async (req, res) => {
+// Check-in delete by fields (name + room + optional checkInYmd); deletes most recent match
+app.delete('/api/checkin', async (req, res) => {
   try {
     await ensureDb();
     if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
 
-    const raw = String(req.params.id || '').trim();
-    // Strict 24-hex check to avoid accidental "truthy" isValid matches
-    const is24Hex = /^[0-9a-fA-F]{24}$/.test(raw);
-    if (!raw) return res.status(400).json({ ok: false, error: 'missing id' });
-    if (!is24Hex) return res.status(400).json({ ok: false, error: 'invalid id' }); // prevents mismatched filter [7]
+    const { name, room, checkInYmd } = req.query || {};
+    const nm = String(name || '').trim().toLowerCase();
+    const rm = Number(room) || 0;
+    if (!nm || !rm) return res.status(400).json({ ok: false, error: 'name and room are required' });
 
-    const _id = new ObjectId(raw);
-    const result = await checkinsCol.deleteOne({ _id }); // precise unique key [2]
-    // Add observability
-    console.log('[DELETE /api/checkin/:id] filter=%j deletedCount=%d', { _id }, result.deletedCount); // helps debug when 0 [1]
+    // Build filter: name (case-insensitive), room contained, and optional date match
+    const filter = {
+      name: { $regex: `^${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' }, // exact case-insensitive [2]
+      $expr: {
+        $in: [
+          rm,
+          { $map: { input: { $ifNull: ['$room', []] }, as: 'r', in: { $toInt: '$$r' } } }
+        ]
+      }
+    };
 
-    if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-    return res.json({ ok: true });
+    // Optional date equality on YYYY-MM-DD derived from checkIn or checkInDate string
+    if (checkInYmd) {
+      const ymd = String(checkInYmd).slice(0, 10);
+      filter.$or = [
+        { checkIn: { $gte: new Date(ymd + 'T00:00:00.000Z'), $lt: new Date(ymd + 'T23:59:59.999Z') } },
+        { checkInDate: ymd }
+      ];
+    }
+
+    // Find the most recent match, then delete by _id to be precise
+    const doc = await checkinsCol
+      .find(filter, { projection: { _id: 1, checkIn: 1 } })
+      .sort({ checkIn: -1, _id: -1 })
+      .limit(1)
+      .next();
+
+    console.log('[DELETE /api/checkin by fields] filter=%j hit=%j', filter, doc?._id); // debug visibility [1]
+
+    if (!doc?._id) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const result = await checkinsCol.deleteOne({ _id: doc._id }); // precise delete [2]
+    return res.json({ ok: true, deletedId: String(doc._id), deletedCount: result.deletedCount || 0 });
   } catch (e) {
-    console.error('DELETE /api/checkin/:id failed:', e);
+    console.error('DELETE /api/checkin (by fields) failed:', e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 
 // Reservation create (MongoDB reservations collection)
