@@ -473,6 +473,42 @@ app.delete('/api/checkin/:id', async (req, res) => {
   }
 });
 
+// Check-in update
+app.put('/api/checkin/:id', async (req, res) => {
+  try {
+    await ensureDb();
+    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
+    const id = String(req.params.id || '');
+    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
+
+    const patch = {};
+    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
+    if (req.body?.contact !== undefined) patch.contact = String(req.body.contact).trim();
+    if (req.body?.room !== undefined) {
+      patch.room = Array.isArray(req.body.room)
+        ? req.body.room.map(Number)
+        : String(req.body.room).split(',').map(s => Number(s.trim())).filter(Boolean);
+    }
+    if (req.body?.rate !== undefined) patch.rate = Number(req.body.rate) || 0;
+
+    // Optional: allow editing checkInDate/Time if passed
+    if (req.body?.checkInDate) patch.checkInDate = req.body.checkInDate;
+    if (req.body?.checkInTime) patch.checkInTime = req.body.checkInTime;
+
+    patch.updatedAt = new Date().toISOString();
+
+    const r = await checkinsCol.updateOne({ _id: new ObjectId(id) }, { $set: patch });
+    if (!r.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('PUT /api/checkin/:id failed:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+
 // Reservation create (MongoDB reservations collection)
 app.post('/api/reservation', async (req, res) => {
   try {
@@ -548,68 +584,6 @@ app.post('/api/checkout', async (req, res) => {
   }
 });
 
-// Update checkin and also update related payments
-app.put('/api/checkin', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!checkinsCol || !paymentsCol) {  // make sure you defined paymentsCol in ensureDb()
-      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    }
-
-    const b = req.body || {};
-    if (!b.name || !b.room || !b.checkInDate) {
-      return res.status(400).json({ ok: false, error: 'Missing name, room, or checkInDate' });
-    }
-
-    // ---- Update Checkin ----
-    const patch = {};
-    if (b.newName !== undefined) patch.name = String(b.newName).trim();
-    if (b.contact !== undefined) patch.contact = String(b.contact).trim();
-    if (b.room !== undefined) {
-      patch.room = Array.isArray(b.room) ? b.room.map(Number) : [Number(b.room)];
-    }
-    if (b.rate !== undefined) patch.rate = Number(b.rate) || 0;
-
-    const checkinResult = await checkinsCol.updateOne(
-      {
-        name: String(b.name).trim(),
-        checkInDate: String(b.checkInDate).trim(),
-        room: { $in: Array.isArray(b.room) ? b.room.map(Number) : [Number(b.room)] }
-      },
-      { $set: patch }
-    );
-
-    // ---- Update Payments ----
-    let paymentResult = null;
-    if (checkinResult.matchedCount) {
-      paymentResult = await paymentsCol.updateMany(
-        {
-          name: String(b.name).trim(),
-          room: { $in: Array.isArray(b.room) ? b.room.map(Number) : [Number(b.room)] }
-        },
-        {
-          $set: {
-            ...(b.newName ? { name: String(b.newName).trim() } : {}),
-            ...(b.room ? { room: Array.isArray(b.room) ? b.room.map(Number) : [Number(b.room)] } : {})
-          }
-        }
-      );
-    }
-
-    if (!checkinResult.matchedCount) {
-      return res.status(404).json({ ok: false, error: 'checkin not found' });
-    }
-
-    res.json({
-      ok: true,
-      modifiedCheckin: checkinResult.modifiedCount,
-      modifiedPayments: paymentResult ? paymentResult.modifiedCount : 0
-    });
-  } catch (e) {
-    console.error('PUT /api/checkin failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
-});
 
 
 (async () => {
