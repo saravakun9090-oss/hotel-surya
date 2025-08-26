@@ -744,43 +744,48 @@ let foundOld = null;
 console.warn("Failed to persist edit to disk:", err);
 }
 
+// --- Mirror edited check-in to backend so LiveUpdate reflects changes ---
 try {
   const API_BASE =
     window.__MONGO_API_BASE__ ||
     (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
     '/api';
 
-  // 1) Update server check-in (if id known)
-  const mongoId = editGuest?.guest?.id;
-  if (mongoId) {
-    await fetch(`${API_BASE}/checkin/${encodeURIComponent(mongoId)}`, {
+  const checkInISO = (editGuest.guest?.checkIn || '').slice(0, 10);
+  const updatedPayload = {
+    name: editNameInput,
+    room: newRooms,
+    rate: Number(editRateInput) || 0,
+    contact: editGuest.guest?.contact || '',
+    checkInDate: editGuest.guest?.checkInDate || '',
+    checkInTime: editGuest.guest?.checkInTime || '',
+    checkInDateTime: editGuest.guest?.checkIn || '' // keep original ISO datetime
+  };
+
+  // Preferred: update by stored id if available
+  const id = editGuest.guest?.id;
+  if (id) {
+    await fetch(`${API_BASE}/checkin/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedPayload)
+    }).catch(() => {});
+  } else {
+    // Fallback: ask server to remap its check-in record by signature
+    await fetch(`${API_BASE}/checkin/remap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: editNameInput,
-        room: newRooms,
-        rate: Number(editRateInput) || 0,
-        contact: editGuest.guest?.contact || '',
-        checkInDate: editGuest.guest?.checkInDate || '',
-        checkInTime: editGuest.guest?.checkInTime || ''
+        fromName: (editGuest.guest?.name || '').trim(),
+        toName: editNameInput.trim(),
+        fromRooms: origRooms,
+        toRooms: newRooms,
+        sinceYmd: checkInISO
       })
     }).catch(() => {});
   }
-
-  // 2) Remap existing server rent rows for this stay (optional but recommended)
-  await fetch(`${API_BASE}/rent-payment/remap`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fromName: (editGuest.guest?.name || '').trim(),
-      toName: editNameInput.trim(),
-      fromRooms: origRooms,
-      toRooms: newRooms,
-      sinceYmd: (editGuest.guest?.checkIn || '').slice(0, 10)
-    })
-  }).catch(() => {});
 } catch (e) {
-  console.warn('server mirrors after edit failed', e);
+  console.warn('check-in mirror update failed', e);
 }
 
 
