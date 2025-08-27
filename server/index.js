@@ -530,24 +530,48 @@ app.post('/api/reservation', async (req, res) => {
   }
 });
 
-// Reservation delete
+// server/reservations.routes.js
+const { ObjectId } = require('mongodb');
+
 app.delete('/api/reservation/:id', async (req, res) => {
   try {
     await ensureDb();
-    if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    const id = String(req.params.id || '');
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
+    if (!reservationsCol) {
+      return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+    }
 
-    const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
-    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-    // Future: sseBroadcast('reservations', {...}) if adding client channel
-    res.json({ ok: true });
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+
+    // Try ObjectId delete first if id looks valid
+    let result = { deletedCount: 0 };
+    if (ObjectId.isValid(id)) {
+      result = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
+    }
+
+    // Fallback: if nothing deleted and some rows may have string _id
+    if (!result.deletedCount) {
+      result = await reservationsCol.deleteOne({ _id: id });
+    }
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+
+    // Optional: remove corresponding reservation file on disk if provided
+    const { dateKey, room, name } = req.query;
+    if (dateKey && room && name) {
+      try { await deleteReservationFileOnDisk({ dateKey, room: Number(room), name: String(name) }); } catch {}
+     }
+
+    // Either 204 or 200. Use 200 with payload for clients that expect JSON
+    return res.status(200).json({ ok: true, deletedCount: result.deletedCount });
   } catch (e) {
     console.error('DELETE /api/reservation/:id failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // Optional: record a checkout (MongoDB checkouts collection)
 app.post('/api/checkout', async (req, res) => {
