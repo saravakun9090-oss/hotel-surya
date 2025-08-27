@@ -531,23 +531,25 @@ app.post('/api/reservation', async (req, res) => {
 });
 
 // Reservation delete
+// DELETE /api/reservation/:id
 app.delete('/api/reservation/:id', async (req, res) => {
   try {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
+
     const id = String(req.params.id || '');
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
     if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
     if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-    // Future: sseBroadcast('reservations', {...}) if adding client channel
+
     res.json({ ok: true });
   } catch (e) {
     console.error('DELETE /api/reservation/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // Optional: record a checkout (MongoDB checkouts collection)
 app.post('/api/checkout', async (req, res) => {

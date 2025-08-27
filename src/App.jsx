@@ -1414,26 +1414,67 @@ setSelectedRoom(null);
 setScanFile(null);
 setTimeout(() => setSuccessMsg(""), 3000);
 
-const newState = { ...state, floors: { ...state.floors } };
 const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
+// 1) Build the local state (as you already do), but do not clear state yet
+const newState = { ...state, floors: { ...state.floors } };
 Object.keys(newState.floors).forEach(fnum => {
-newState.floors[fnum] = newState.floors[fnum].map(r =>
-roomsToOccupy.includes(r.number)
-? {
-...r,
-status: "occupied",
-guest: {
-name: form.name,
-contact: form.contact,
-checkIn: now.toISOString(),
-checkInDate,
-checkInTime,
-rate: Number(form.rate) || 0
-}
-}
-: r
-);
+  newState.floors[fnum] = newState.floors[fnum].map(r =>
+    roomsToOccupy.includes(r.number)
+      ? {
+          ...r,
+          status: "occupied",
+          guest: {
+            name: form.name,
+            contact: form.contact,
+            checkIn: now.toISOString(),
+            checkInDate,
+            checkInTime,
+            rate: Number(form.rate) || 0,
+            id: "" // temporary, will fill after POST
+          }
+        }
+      : r
+  );
 });
+
+// 2) Create in Mongo and capture the id
+let mongoId = null;
+try {
+  const API_BASE =
+    window.__MONGO_API_BASE__ ||
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+    '/api';
+
+  const resp = await fetch(`${API_BASE}/checkin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: form.name || 'Guest',
+      contact: form.contact || '',
+      room: roomsToOccupy,
+      rate: Number(form.rate) || 0,
+      checkInDate,
+      checkInTime,
+      checkIn: now.toISOString(),
+      checkInDateTime: now.toISOString()
+    })
+  });
+  if (resp.ok) {
+    const j = await resp.json().catch(() => null);
+    mongoId = (j && (j._id || j.id)) || null;
+  }
+} catch { /* ignore network errors */ }
+
+// 3) Inject id into state for all occupied rooms in this group
+if (mongoId) {
+  Object.keys(newState.floors).forEach(fnum => {
+    newState.floors[fnum] = newState.floors[fnum].map(r =>
+      roomsToOccupy.includes(r.number)
+        ? { ...r, guest: { ...(r.guest || {}), id: mongoId } }
+        : r
+    );
+  });
+}
 
 // Remove matching reservations for any of the rooms checked-in
 const roomsSet = new Set(roomsToOccupy.map(Number));
@@ -1447,7 +1488,6 @@ await deleteReservationFile(rm.date, rm.room, rm.name);
 
 setState(newState);
 saveState(newState);
-// In App, after setState(newState) and saveState(newState):
 try {
   if ('BroadcastChannel' in window) {
     const bc = new BroadcastChannel('hotel_state');
@@ -1456,16 +1496,18 @@ try {
   }
 } catch {}
 
-
+// 5) Persist Checkins JSON with id included, so reloads keep the id
 await saveCheckinData({
-name: form.name,
-contact: form.contact,
-room: roomsToOccupy,
-checkIn: now.toISOString(),
-checkInDate,
-checkInTime,
-rate: Number(form.rate) || 0
+  id: mongoId || undefined,
+  name: form.name,
+  contact: form.contact,
+  room: roomsToOccupy,
+  checkIn: now.toISOString(),
+  checkInDate,
+  checkInTime,
+  rate: Number(form.rate) || 0
 });
+
 
 // MIRROR: check-in event
 try {
