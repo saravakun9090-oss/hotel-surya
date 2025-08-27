@@ -483,18 +483,16 @@ app.put('/api/checkin/:id', async (req, res) => {
     if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
     const patch = {};
-    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
+    if (req.body?.name !== undefined)    patch.name = String(req.body.name).trim();
     if (req.body?.contact !== undefined) patch.contact = String(req.body.contact).trim();
     if (req.body?.room !== undefined) {
       patch.room = Array.isArray(req.body.room)
         ? req.body.room.map(Number)
         : String(req.body.room).split(',').map(s => Number(s.trim())).filter(Boolean);
     }
-    if (req.body?.rate !== undefined) patch.rate = Number(req.body.rate) || 0;
-
-    // Optional: allow editing checkInDate/Time if passed
-    if (req.body?.checkInDate) patch.checkInDate = req.body.checkInDate;
-    if (req.body?.checkInTime) patch.checkInTime = req.body.checkInTime;
+    if (req.body?.rate !== undefined)    patch.rate = Number(req.body.rate) || 0;
+    if (req.body?.checkInDate)           patch.checkInDate = req.body.checkInDate;
+    if (req.body?.checkInTime)           patch.checkInTime = req.body.checkInTime;
 
     patch.updatedAt = new Date().toISOString();
 
@@ -507,6 +505,7 @@ app.put('/api/checkin/:id', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 
 // Reservation create (MongoDB reservations collection)
