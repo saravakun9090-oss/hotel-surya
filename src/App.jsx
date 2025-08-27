@@ -1400,140 +1400,153 @@ async function saveEditChanges() {
 
 
   const submit = async (e) => {
-e.preventDefault();
-if (!form.room) return alert("Select a room");
-if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
+  e.preventDefault();
+  if (!form.room) return alert("Select a room");
+  if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
 
-const now = new Date();
-const checkInDate = now.toLocaleDateString();
-const checkInTime = now.toLocaleTimeString();
+  const now = new Date();
+  const checkInDate = now.toLocaleDateString();
+  const checkInTime = now.toLocaleTimeString();
 
-setSuccessMsg(`Room ${form.room} reserved successfully`);
-setForm({ name: "", contact: "", room: "", rate: "" });
-setSelectedRoom(null);
-setScanFile(null);
-setTimeout(() => setSuccessMsg(""), 3000);
+  const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
 
-const roomsToOccupy = Array.isArray(form.room) ? form.room.map(Number) : [Number(form.room)];
-// 1) Build the local state (as you already do), but do not clear state yet
-const newState = { ...state, floors: { ...state.floors } };
-Object.keys(newState.floors).forEach(fnum => {
-  newState.floors[fnum] = newState.floors[fnum].map(r =>
-    roomsToOccupy.includes(r.number)
-      ? {
-          ...r,
-          status: "occupied",
-          guest: {
-            name: form.name,
-            contact: form.contact,
-            checkIn: now.toISOString(),
-            checkInDate,
-            checkInTime,
-            rate: Number(form.rate) || 0,
-            id: "" // temporary, will fill after POST
-          }
-        }
-      : r
-  );
-});
-
-// 2) Create in Mongo and capture the id
-let mongoId = null;
-try {
-  const API_BASE =
-    window.__MONGO_API_BASE__ ||
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-    '/api';
-
-  const resp = await fetch(`${API_BASE}/checkin`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: form.name || 'Guest',
-      contact: form.contact || '',
-      room: roomsToOccupy,
-      rate: Number(form.rate) || 0,
-      checkInDate,
-      checkInTime,
-      checkIn: now.toISOString(),
-      checkInDateTime: now.toISOString()
-    })
-  });
-  if (resp.ok) {
-    const j = await resp.json().catch(() => null);
-    mongoId = (j && (j._id || j.id)) || null;
-  }
-} catch { /* ignore network errors */ }
-
-// 3) Inject id into state for all occupied rooms in this group
-if (mongoId) {
+  // Prepare local state first (without id)
+  const newState = { ...state, floors: { ...state.floors } };
   Object.keys(newState.floors).forEach(fnum => {
     newState.floors[fnum] = newState.floors[fnum].map(r =>
       roomsToOccupy.includes(r.number)
-        ? { ...r, guest: { ...(r.guest || {}), id: mongoId } }
+        ? {
+            ...r,
+            status: "occupied",
+            guest: {
+              name: form.name,
+              contact: form.contact,
+              checkIn: now.toISOString(),
+              checkInDate,
+              checkInTime,
+              rate: Number(form.rate) || 0,
+              id: "" // temp, will fill after server
+            }
+          }
         : r
     );
   });
-}
 
-// Remove matching reservations for any of the rooms checked-in
-const roomsSet = new Set(roomsToOccupy.map(Number));
-const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
-if (reservationMatches.length) {
-newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
-for (const rm of reservationMatches) {
-await deleteReservationFile(rm.date, rm.room, rm.name);
-}
-}
-
-setState(newState);
-saveState(newState);
-try {
-  if ('BroadcastChannel' in window) {
-    const bc = new BroadcastChannel('hotel_state');
-    bc.postMessage({ type: 'state:update', state: newState });
-    bc.close();
+  // Remove matching reservations for any of the rooms checked-in
+  const todayISO = (new Date()).toISOString().slice(0,10);
+  const roomsSet = new Set(roomsToOccupy.map(Number));
+  const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
+  if (reservationMatches.length) {
+    newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
+    for (const rm of reservationMatches) {
+      await deleteReservationFile(rm.date, rm.room, rm.name);
+    }
   }
-} catch {}
 
-// 5) Persist Checkins JSON with id included, so reloads keep the id
-await saveCheckinData({
-  id: mongoId || undefined,
-  name: form.name,
-  contact: form.contact,
-  room: roomsToOccupy,
-  checkIn: now.toISOString(),
-  checkInDate,
-  checkInTime,
-  rate: Number(form.rate) || 0
-});
+  // One and only server call: POST if no id, else PUT by id
+  let mongoId = null;
+  try {
+    const API_BASE =
+      window.__MONGO_API_BASE__ ||
+      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+      '/api';
 
+    // Try to see if any of the rooms already has an id for this checkin (rare, e.g., re-submit)
+    let existingId = null;
+    for (const farr of Object.values(state.floors)) {
+      for (const r of farr) {
+        if (roomsSet.has(Number(r.number)) && r.guest?.id) {
+          existingId = r.guest.id;
+          break;
+        }
+      }
+      if (existingId) break;
+    }
 
-// MIRROR: check-in event
-try {
-const API_BASE =
-window.MONGO_API_BASE ||
-(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-'/api';
-await fetch(`${API_BASE}/checkin`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: form.name || 'Guest',
-    contact: form.contact || '',
+    if (existingId) {
+      // Update existing server record
+      const putResp = await fetch(`${API_BASE}/checkin/${encodeURIComponent(existingId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name || 'Guest',
+          contact: form.contact || '',
+          room: roomsToOccupy,
+          rate: Number(form.rate) || 0,
+          checkInDate,
+          checkInTime
+        })
+      });
+      if (putResp.ok) mongoId = existingId;
+    } else {
+      // Create once
+      const postResp = await fetch(`${API_BASE}/checkin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name || 'Guest',
+          contact: form.contact || '',
+          room: roomsToOccupy,
+          rate: Number(form.rate) || 0,
+          checkInDate,
+          checkInTime,
+          checkIn: now.toISOString(),
+          checkInDateTime: now.toISOString()
+        })
+      });
+      if (postResp.ok) {
+        const j = await postResp.json().catch(() => null);
+        mongoId = (j && (j._id || j.id)) || null;
+      }
+    }
+  } catch {
+    // ignore server errors, local still works
+  }
+
+  // Inject id (if received) into all occupied rooms for this check-in
+  if (mongoId) {
+    Object.keys(newState.floors).forEach(fnum => {
+      newState.floors[fnum] = newState.floors[fnum].map(r =>
+        roomsToOccupy.includes(r.number)
+          ? { ...r, guest: { ...(r.guest || {}), id: mongoId } }
+          : r
+      );
+    });
+  }
+
+  // Persist local app state and broadcast
+  setState(newState);
+  saveState(newState);
+  try {
+    if ('BroadcastChannel' in window) {
+      const bc = new BroadcastChannel('hotel_state');
+      bc.postMessage({ type: 'state:update', state: newState });
+      bc.close();
+    }
+  } catch {}
+
+  // Persist Checkins JSON (include id to avoid future POSTs)
+  await saveCheckinData({
+    id: mongoId || undefined,
+    name: form.name,
+    contact: form.contact,
     room: roomsToOccupy,
-    rate: Number(form.rate) || 0,
+    checkIn: now.toISOString(),
     checkInDate,
     checkInTime,
-    checkInDateTime: now.toISOString()
-  })
-}).catch(() => {});
-} catch (err) {
-// ignore mirror failures
-}
+    rate: Number(form.rate) || 0
+  });
 
-setRefreshKey(k => k + 1);
+  // UI feedback and cleanup
+  setSuccessMsg(`Room ${form.room} reserved successfully`);
+  setForm({ name: "", contact: "", room: "", rate: "" });
+  setSelectedRoom(null);
+  setScanFile(null);
+  setTimeout(() => setSuccessMsg(""), 3000);
+
+  setRefreshKey(k => k + 1);
 };
+
 
   const legendDot = (bg) => ({
     display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
