@@ -1299,57 +1299,115 @@ setRefreshKey(k => k + 1);
   }
 
   const saveCheckinData = async (guest) => {
-    const base = await getBaseFolder();
-    if (!base) return console.warn("Storage not connected.");
+  const base = await getBaseFolder();
+  if (!base) return console.warn("Storage not connected.");
 
-    const now = new Date();
-    const todayISOstr = ymd(now);
+  const now = new Date();
+  const ymd = (d = new Date()) => d.toISOString().slice(0, 10);
+  const todayISOstr = ymd(now);
 
-    const dataDir = await ensurePath(base, ["Checkins", todayISOstr]);
-  // guest.room is array or single; normalize to array
+  // Ensure DD-MM-YYYY folder structure under ScannedDocuments stays consistent
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const year = String(now.getFullYear());
+  const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
+  const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth() + 1)}-${now.getFullYear()}`;
+
+  // Normalize rooms for filename
   const roomsArr = Array.isArray(guest.room) ? guest.room.map(Number) : [Number(guest.room)];
   const roomsKey = roomsArr.join('_');
-  await writeJSON(dataDir, `checkin-${guest.name}-${roomsKey}-${todayISOstr}.json`, guest);
 
-    const year = String(now.getFullYear());
-    const month = now.toLocaleString("en-US", { month: "short" }).toLowerCase();
-    const dateFolder = `${pad2(now.getDate())}-${pad2(now.getMonth()+1)}-${now.getFullYear()}`;
-    const scansDir = await ensurePath(base, ["ScannedDocuments", year, month, dateFolder]);
+  // Write Checkins/<YYYY-MM-DD>/checkin-<name>-<rooms>-<YYYY-MM-DD>.json
+  const dataDir = await ensurePath(base, ["Checkins", todayISOstr]);
 
-    if (scanFile?.reused && scanFile?.fileHandle) {
-      const safeName = scanFile.safeName.replace(/[^\w\-]+/g, "_");
-      const ext = scanFile.fileHandle.name?.split(".").pop() || "jpg";
-      const newFileName = `${safeName}-${guest.room}-${todayISOstr}.${ext}`;
-      const file = await scanFile.fileHandle.getFile();
-      await writeFile(scansDir, newFileName, file);
-      // attempt upload to server for remote access
+  // Persist the guest payload including optional Mongo id
+  // Fields: { id?, name, contact, room[], checkIn, checkInDate, checkInTime, rate }
+  const checkinPayload = {
+    id: guest.id || undefined,           // Option A: ensure id is saved if available
+    name: String(guest.name || '').trim(),
+    contact: String(guest.contact || '').trim(),
+    room: roomsArr,
+    checkIn: guest.checkIn || now.toISOString(),
+    checkInDate: guest.checkInDate || now.toLocaleDateString(),
+    checkInTime: guest.checkInTime || now.toLocaleTimeString(),
+    rate: Number(guest.rate) || 0
+  };
+
+  await writeJSON(
+    dataDir,
+    `checkin-${checkinPayload.name}-${roomsKey}-${todayISOstr}.json`,
+    checkinPayload
+  );
+
+  // Save scanned document alongside, under ScannedDocuments/YYYY/mon/dd-mm-YYYY
+  const scansDir = await ensurePath(base, ["ScannedDocuments", year, month, dateFolder]);
+
+  // If reusing a previous scan from fileHandle
+  if (scanFile?.reused && scanFile?.fileHandle) {
+    const safeName = String(scanFile.safeName || checkinPayload.name).replace(/[^\w\-]+/g, "_");
+    const ext = scanFile.fileHandle.name?.split(".").pop() || "jpg";
+    const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`;
+
+    const file = await scanFile.fileHandle.getFile();
+    await writeFile(scansDir, newFileName, file);
+
+    // Upload to server for remote access and store link metadata at root link.json (best effort)
+    try {
+      const { uploadFileToServer } = await import('./services/upload');
+      const resp = await uploadFileToServer(file);
       try {
-        const { uploadFileToServer } = await import('./services/upload');
-        const resp = await uploadFileToServer(file);
-        try { await writeJSON(await getBaseFolder(), 'link.json', { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }); } catch (e) {}
-      } catch (e) { console.warn('Upload failed', e); }
-      console.log("Reused old scan saved:", newFileName);
-      return;
+        await writeJSON(
+          await getBaseFolder(),
+          'link.json',
+          { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }
+        );
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('Upload failed', e);
     }
 
-    if (scanFile && scanFile.file) {
-      const ext = scanFile.name && scanFile.name.includes(".") ? scanFile.name.split(".").pop() : "jpg";
-      const newFileName = `${guest.name}-${guest.room}-${todayISOstr}.${ext}`;
-      await writeFile(scansDir, newFileName, scanFile.file);
-      console.log("Saved scanned file:", newFileName);
+    console.log("Reused old scan saved:", newFileName);
+    return;
+  }
 
-      // If this file was picked up from the temporary scanner folder, attempt to delete the temp entry
-      if (scanFile.tempName) {
-        try {
-          const tempDir = await ensurePath(base, ["_ScannerTemp"]);
-          await tempDir.removeEntry(scanFile.tempName);
-          console.log("Deleted temp scan:", scanFile.tempName);
-        } catch (err) {
-          console.warn("Failed to delete temp scan file:", err);
-        }
+  // If a fresh scan/picked file is attached
+  if (scanFile && scanFile.file) {
+    const ext = scanFile.name && scanFile.name.includes(".")
+      ? scanFile.name.split(".").pop()
+      : "jpg";
+
+    const safeName = String(checkinPayload.name).replace(/[^\w\-]+/g, "_");
+    const newFileName = `${safeName}-${roomsKey}-${todayISOstr}.${ext}`;
+    await writeFile(scansDir, newFileName, scanFile.file);
+    console.log("Saved scanned file:", newFileName);
+
+    // Attempt server upload and link.json write (best effort)
+    try {
+      const { uploadFileToServer } = await import('./services/upload');
+      const resp = await uploadFileToServer(scanFile.file);
+      try {
+        await writeJSON(
+          await getBaseFolder(),
+          'link.json',
+          { id: resp.id, filename: newFileName, uploadedAt: new Date().toISOString() }
+        );
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('Upload failed', e);
+    }
+
+    // If this came from _ScannerTemp, try to delete the temp entry
+    if (scanFile.tempName) {
+      try {
+        const tempDir = await ensurePath(base, ["_ScannerTemp"]);
+        await tempDir.removeEntry(scanFile.tempName);
+        console.log("Deleted temp scan:", scanFile.tempName);
+      } catch (err) {
+        console.warn("Failed to delete temp scan file:", err);
       }
     }
-  };
+  }
+};
+
 
   const submit = async (e) => {
 e.preventDefault();
