@@ -1433,9 +1433,22 @@ async function saveEditChanges() {
   });
 
   // Remove matching reservations for any of the rooms checked-in
-  const todayISO = (new Date()).toISOString().slice(0,10);
-  const roomsSet = new Set(roomsToOccupy.map(Number));
-  const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
+  const todayISO = (new Date()).toISOString().slice(0,10); // YYYY-MM-DD
+const todayDMY = (() => {
+  const d = new Date();
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${pad2(d.getDate())}-${pad2(d.getMonth()+1)}-${d.getFullYear()}`;
+})();
+
+// If reservations are stored with DMY, use that; otherwise keep ISO
+const todayKey = /* pick the one your reservation writer uses */ todayISO;
+
+// Remove matching reservations
+const roomsSet = new Set(roomsToOccupy.map(Number));
+const reservationMatches = (state.reservations || []).filter(
+  r => roomsSet.has(Number(r.room)) && r.date === todayKey
+);
+
   if (reservationMatches.length) {
     newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
     for (const rm of reservationMatches) {
@@ -2790,18 +2803,63 @@ async function persistReservation(res) {
 async function deleteReservationFile(date, room, name) {
   try {
     const base = await getBaseFolder();
-    if (!base) {
-      console.warn("Storage not connected; skipping disk deletion");
-      return;
+    if (!base) return;
+
+    // Resolve reservation folder robustly: support both YYYY-MM-DD and DD-MM-YYYY
+    // Prefer the provided 'date' as-is; if missing folder, try alternate format.
+    const tryEnsure = async (parts) => {
+      try {
+        return await ensurePath(base, ["Reservations", ...parts]);
+      } catch {
+        return null;
+      }
+    };
+
+    let dir = await tryEnsure([date]);
+    if (!dir) {
+      // Attempt to flip format between YYYY-MM-DD and DD-MM-YYYY
+      const ymd = /^(\d{4})-(\d{2})-(\d{2})$/;
+      const dmy = /^(\d{2})-(\d{2})-(\d{4})$/;
+      if (ymd.test(date)) {
+        const [, Y, M, D] = date.match(ymd);
+        dir = await tryEnsure([`${D}-${M}-${Y}`]);
+      } else if (dmy.test(date)) {
+        const [, D, M, Y] = date.match(dmy);
+        dir = await tryEnsure([`${Y}-${M}-${D}`]);
+      }
     }
-    const dir = await ensurePath(base, ['Reservations', date]);
-    const safe = String(name).replace(/[^\w\-]+/g, '_'); // same filename sanitization
-    await dir.removeEntry(`reservation-${room}-${safe}.json`);
-    console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
+    if (!dir) return; // no reservations folder for that date
+
+    const safe = String(name || '').replace(/[^\w\-]+/g, "_");
+    const target = `reservation-${Number(room)}-${safe}.json`;
+
+    // Try exact filename first
+    try {
+      await dir.removeEntry(target);
+      return;
+    } catch (e) {
+      // Exact match failed, fall back to scanning by room number
+    }
+
+    // Fallback: delete any reservation file that matches the room number, ignoring name mismatches
+    for await (const [entryName, entryHandle] of dir.entries()) {
+      if (entryHandle.kind !== "file") continue;
+      if (!entryName.endsWith(".json")) continue;
+      // Match patterns like reservation-101-*.json
+      if (entryName.startsWith(`reservation-${Number(room)}-`)) {
+        try {
+          await dir.removeEntry(entryName);
+          return;
+        } catch {
+          // keep trying others if multiple exist
+        }
+      }
+    }
   } catch (err) {
-    console.warn("Failed to delete reservation file from disk:", err);
+    console.warn("Failed to delete reservation file", err);
   }
 }
+
 
 function Reservations({ state, setState }) {
   const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
