@@ -1171,7 +1171,7 @@ async function saveEditChanges() {
     }
   };
 
-  async function deleteReservationFile(date, room, name) {
+  async function deleteReservation(date, room, name) {
     try {
       const base = await getBaseFolder();
       if (!base) return;
@@ -2997,7 +2997,7 @@ try {
 
 
     // ✅ Remove from disk
-    await deleteReservationFile(res.date, res.room, res.name);
+    await deleteReservation(res.date, res.room, res.name);
   };
 
   const navigate = useNavigate();
