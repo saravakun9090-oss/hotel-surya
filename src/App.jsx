@@ -1171,7 +1171,7 @@ async function saveEditChanges() {
     }
   };
 
-  async function deleteReservation(date, room, name) {
+  async function deleteReservationFile(date, room, name) {
     try {
       const base = await getBaseFolder();
       if (!base) return;
@@ -1433,34 +1433,15 @@ async function saveEditChanges() {
   });
 
   // Remove matching reservations for any of the rooms checked-in
-  const todayISO = (new Date()).toISOString().slice(0,10); // YYYY-MM-DD
-const todayDMY = (() => {
-  const d = new Date();
-  const pad2 = (n) => String(n).padStart(2, '0');
-  return `${pad2(d.getDate())}-${pad2(d.getMonth()+1)}-${d.getFullYear()}`;
-})();
-
-// If reservations are stored with DMY, use that; otherwise keep ISO
-const todayKey = /* pick the one your reservation writer uses */ todayISO;
-
-// if your reservation writer uses this same key
-
-// Remove matching reservations for any of the rooms checked-in
-const roomsSet = new Set(roomsToOccupy.map(Number));
-const matches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
-
-if (matches.length) {
-  const updated = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
-  newState.reservations = updated;
-
-  for (const rm of matches) {
-    try {
-      await deleteReservation({ dateKey: rm.date, room: rm.room, name: rm.name });
-    } catch (e) {
-      console.warn('Reservation delete failed', rm, e);
+  const todayISO = (new Date()).toISOString().slice(0,10);
+  const roomsSet = new Set(roomsToOccupy.map(Number));
+  const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
+  if (reservationMatches.length) {
+    newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
+    for (const rm of reservationMatches) {
+      await deleteReservationFile(rm.date, rm.room, rm.name);
     }
   }
-}
 
   // One and only server call: POST if no id, else PUT by id
   let mongoId = null;
@@ -2806,85 +2787,21 @@ async function persistReservation(res) {
 }
 
 // --- Delete a reservation file from the connected storage folder ---
-
-
-export function sanitizeNameForFile(name) {
-  return String(name || '').replace(/[^\w\-]+/g, '_'); // match writers
-}
-
-export function deriveAltDateKey(key) {
-  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/;
-  const dmy = /^(\d{2})-(\d{2})-(\d{4})$/;
-  if (ymd.test(key)) {
-    const [, Y, M, D] = key.match(ymd);
-    return `${D}-${M}-${Y}`;
-  }
-  if (dmy.test(key)) {
-    const [, D, M, Y] = key.match(dmy);
-    return `${Y}-${M}-${D}`;
-  }
-  return null;
-}
-
-export async function ensureReservationsDir(base, dateKey) {
-  // Try given key; if not found, try alternate format
-  try { return await ensurePath(base, ['Reservations', dateKey]); } catch {}
-  const alt = deriveAltDateKey(dateKey);
-  if (alt) { try { return await ensurePath(base, ['Reservations', alt]); } catch {} }
-  return null;
-}
-
-export async function deleteReservation({ dateKey, room, name }) {
-  const base = await getBaseFolder();
-  if (!base) throw new Error('Storage not connected');
-  const dir = await ensureReservationsDir(base, String(dateKey || '').trim());
-  if (!dir) return false; // nothing to delete
-
-  const safe = sanitizeNameForFile(name);
-  const primary = `reservation-${Number(room)}-${safe}.json`;
-
-  // 1) Try exact
+async function deleteReservationFile(date, room, name) {
   try {
-    await dir.removeEntry(primary);
-    await maybeCleanupEmptyReservationsDateFolder(base, dir);
-    return true;
-  } catch {}
-
-  // 2) Fallback by room (name may differ)
-  for await (const [entryName, entryHandle] of dir.entries()) {
-    if (entryHandle.kind !== 'file') continue;
-    if (!entryName.endsWith('.json')) continue;
-    if (entryName.startsWith(`reservation-${Number(room)}-`)) {
-      try {
-        await dir.removeEntry(entryName);
-        await maybeCleanupEmptyReservationsDateFolder(base, dir);
-        return true;
-      } catch {}
+    const base = await getBaseFolder();
+    if (!base) {
+      console.warn("Storage not connected; skipping disk deletion");
+      return;
     }
+    const dir = await ensurePath(base, ['Reservations', date]);
+    const safe = String(name).replace(/[^\w\-]+/g, '_'); // same filename sanitization
+    await dir.removeEntry(`reservation-${room}-${safe}.json`);
+    console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
+  } catch (err) {
+    console.warn("Failed to delete reservation file from disk:", err);
   }
-
-  // 3) Defensive: also allow bare pattern reservation-<room>.json if some writer skipped name
-  try {
-    await dir.removeEntry(`reservation-${Number(room)}.json`);
-    await maybeCleanupEmptyReservationsDateFolder(base, dir);
-    return true;
-  } catch {}
-
-  return false;
 }
-
-async function maybeCleanupEmptyReservationsDateFolder(base, dateDirHandle) {
-  // Best-effort: remove empty date folder
-  try {
-    let hasAny = false;
-    for await (const _ of dateDirHandle.entries()) { hasAny = true; break; }
-    if (!hasAny) {
-      // need parent handle; easiest is re-open by name path if available
-      // skip complicated parent traversal; safe to ignore
-    }
-  } catch {}
-}
-
 
 function Reservations({ state, setState }) {
   const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
@@ -2997,7 +2914,7 @@ try {
 
 
     // ✅ Remove from disk
-    await deleteReservation(res.date, res.room, res.name);
+    await deleteReservationFile(res.date, res.room, res.name);
   };
 
   const navigate = useNavigate();
