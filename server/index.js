@@ -559,10 +559,10 @@ app.delete('/api/reservation/:id', async (req, res) => {
     }
 
     // Optional: remove corresponding reservation file on disk if provided
-    const { dateKey, room, name } = req.query;
-    if (dateKey && room && name) {
-      try { await deleteReservationFileOnDisk({ dateKey, room: Number(room), name: String(name) }); } catch {}
-     }
+    // const { dateKey, room, name } = req.query;
+    // if (dateKey && room && name) {
+    //   try { await deleteReservationFileOnDisk({ dateKey, room: Number(room), name: String(name) }); } catch {}
+    // }
 
     // Either 204 or 200. Use 200 with payload for clients that expect JSON
     return res.status(200).json({ ok: true, deletedCount: result.deletedCount });
