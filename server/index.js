@@ -1,3 +1,4 @@
+// server/index.js
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -24,8 +25,8 @@ let bucket;
 let checkoutsCol;
 let rentPaymentsCol;
 let expensesCol;
-let checkinsCol;
-let reservationsCol;
+let checkinsCol;     // check-ins in MongoDB
+let reservationsCol; // reservations in MongoDB
 
 // Simple in-memory SSE clients registry (currently used for rent & expenses)
 const sseClients = {
@@ -60,24 +61,26 @@ async function initDb() {
     serverSelectionTimeoutMS: 8000,
   });
   await dbClient.connect();
+
   db = dbClient.db(DB_NAME);
+
   col = db.collection(COLLECTION);
   bucket = new GridFSBucket(db, { bucketName: 'uploads' });
-  checkoutsCol = db.collection('checkouts');
-  checkinsCol = db.collection('checkins');
+
+  checkoutsCol    = db.collection('checkouts');
+  checkinsCol     = db.collection('checkins');
   reservationsCol = db.collection('reservations');
   rentPaymentsCol = db.collection('rent_payments');
-  expensesCol = db.collection('expenses');
+  expensesCol     = db.collection('expenses');
 
   await Promise.allSettled([
     checkinsCol.createIndex({ checkIn: -1 }),
-    checkinsCol.createIndex({ stayKey: 1 }),
     reservationsCol.createIndex({ date: -1 }),
     checkoutsCol.createIndex({ checkOutDateTime: -1 }),
     rentPaymentsCol.createIndex({ date: -1 }),
-    rentPaymentsCol.createIndex({ stayKey: 1 }),
     expensesCol.createIndex({ date: -1 }),
   ]);
+
   console.log('[DB] Connected. Collections and indexes ready.');
 }
 
@@ -118,8 +121,10 @@ app.get('/api/sse/rent', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
+
   sseClients.rent.add(res);
   res.write(': connected to rent channel\n\n');
+
   req.on('close', () => {
     try { res.end(); } catch {}
     sseClients.rent.delete(res);
@@ -131,8 +136,10 @@ app.get('/api/sse/expenses', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
+
   sseClients.expenses.add(res);
   res.write(': connected to expenses channel\n\n');
+
   req.on('close', () => {
     try { res.end(); } catch {}
     sseClients.expenses.delete(res);
@@ -167,7 +174,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       .on('finish', (file) => {
         res.json({ ok: true, id: file._id.toString(), filename: file.filename });
       });
-
   } catch (e) {
     console.error('POST /api/upload failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -190,14 +196,13 @@ app.get('/api/download/:id', async (req, res) => {
       res.status(404).send(String(err));
     });
     downloadStream.pipe(res);
-
   } catch (e) {
     console.error('GET /api/download/:id failed:', e);
     res.status(500).send(String(e));
   }
 });
 
-// Dedicated endpoint to fetch checkins directly from MongoDB
+// Dedicated endpoint to fetch checkins directly from MongoDB (requested change)
 app.get('/api/checkins', async (req, res) => {
   try {
     await ensureDb();
@@ -245,7 +250,6 @@ app.get('/api/state', async (req, res) => {
         expenses: m(expensesRaw)
       }
     });
-
   } catch (e) {
     console.error('GET /api/state failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -265,14 +269,13 @@ app.post('/api/state', async (req, res) => {
       { upsert: true }
     );
     res.json({ ok: true });
-
   } catch (e) {
     console.error('POST /api/state failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Rent payment: create (now accepts stayKey)
+// Rent payment: create
 app.post('/api/rent-payment', async (req, res) => {
   try {
     await ensureDb();
@@ -288,14 +291,12 @@ app.post('/api/rent-payment', async (req, res) => {
       mode: String(body.mode || 'Cash'),
       date: body.date || new Date().toISOString().slice(0, 10),
       checkInYmd: body.checkInYmd ? String(body.checkInYmd).slice(0, 10) : null,
-      stayKey: body.stayKey ? String(body.stayKey).trim() : null,
       createdAt: new Date().toISOString()
     };
 
     const result = await rentPaymentsCol.insertOne(doc);
     sseBroadcast('rent', { action: 'created', id: String(result.insertedId) });
     res.json({ ok: true, id: String(result.insertedId) });
-
   } catch (e) {
     console.error('POST /api/rent-payment failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -327,7 +328,6 @@ app.put('/api/rent-payment/:id', async (req, res) => {
 
     sseBroadcast('rent', { action: 'updated', id });
     res.json({ ok: true });
-
   } catch (e) {
     console.error('PUT /api/rent-payment/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -347,14 +347,13 @@ app.delete('/api/rent-payment/:id', async (req, res) => {
 
     sseBroadcast('rent', { action: 'deleted', id });
     res.json({ ok: true });
-
   } catch (e) {
     console.error('DELETE /api/rent-payment/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Rent payment: remap by filters (existing)
+// Rent payment: remap
 app.post('/api/rent-payment/remap', async (req, res) => {
   try {
     await ensureDb();
@@ -377,41 +376,8 @@ app.post('/api/rent-payment/remap', async (req, res) => {
     const result = await rentPaymentsCol.updateMany(q, { $set: u });
     if (result.modifiedCount) sseBroadcast('rent', { action: 'remapped', count: result.modifiedCount });
     res.json({ ok: true, matched: result.matchedCount || 0, modified: result.modifiedCount || 0 });
-
   } catch (e) {
     console.error('POST /api/rent-payment/remap failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
-});
-
-// NEW: Rent payment remap by stayKey
-app.post('/api/rent-payment/remap-by-stay-key', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!rentPaymentsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-
-    const { stayKey, name, room } = req.body || {};
-    const sk = String(stayKey || '').trim();
-    if (!sk) return res.status(400).json({ ok: false, error: 'missing stayKey' });
-
-    const setPatch = {};
-    if (name !== undefined) setPatch.name = String(name).trim();
-    if (room !== undefined) {
-      const rooms = Array.isArray(room)
-        ? room.map(Number)
-        : String(room).split(',').map(s => Number(s.trim())).filter(Boolean);
-      setPatch.room = rooms;
-    }
-    if (!Object.keys(setPatch).length) {
-      return res.json({ ok: true, matched: 0, modified: 0 });
-    }
-
-    const r = await rentPaymentsCol.updateMany({ stayKey: sk }, { $set: setPatch });
-    if (r.modifiedCount) sseBroadcast('rent', { action: 'remapped', count: r.modifiedCount });
-    res.json({ ok: true, matched: r.matchedCount || 0, modified: r.modifiedCount || 0 });
-
-  } catch (e) {
-    console.error('POST /api/rent-payment/remap-by-stay-key failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
@@ -434,7 +400,6 @@ app.post('/api/expense', async (req, res) => {
     sseBroadcast('expenses', { action: 'created', id: String(result.insertedId) });
 
     res.json({ ok: true, id: String(result.insertedId) });
-
   } catch (e) {
     console.error('POST /api/expense failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -457,14 +422,13 @@ app.delete('/api/expense/:id', async (req, res) => {
     sseBroadcast('expenses', { action: 'deleted', id });
 
     res.json({ ok: true });
-
   } catch (e) {
     console.error('DELETE /api/expense/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Check-in create (MongoDB checkins collection) — now accepts stayKey
+// Check-in create (MongoDB checkins collection)
 app.post('/api/checkin', async (req, res) => {
   try {
     await ensureDb();
@@ -479,11 +443,10 @@ app.post('/api/checkin', async (req, res) => {
       checkInDate: b.checkInDate || null,
       checkInTime: b.checkInTime || null,
       checkIn: b.checkIn || new Date().toISOString(),
-      stayKey: b.stayKey ? String(b.stayKey).trim() : null,
       createdAt: new Date().toISOString()
     };
     const r = await checkinsCol.insertOne(doc);
-    // Future: sseBroadcast('checkin', {...})
+    // Future: sseBroadcast('checkin', {...}) if adding client channel
     res.json({ ok: true, id: String(r.insertedId) });
   } catch (e) {
     console.error('POST /api/checkin failed:', e);
@@ -502,15 +465,15 @@ app.delete('/api/checkin/:id', async (req, res) => {
 
     const r = await checkinsCol.deleteOne({ _id: new ObjectId(id) });
     if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    // Future: sseBroadcast('checkin', {...}) if adding client channel
     res.json({ ok: true });
-
   } catch (e) {
     console.error('DELETE /api/checkin/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Check-in update by id
+// Check-in update
 app.put('/api/checkin/:id', async (req, res) => {
   try {
     await ensureDb();
@@ -529,6 +492,7 @@ app.put('/api/checkin/:id', async (req, res) => {
     }
     if (req.body?.rate !== undefined) patch.rate = Number(req.body.rate) || 0;
 
+    // Optional: allow editing checkInDate/Time if passed
     if (req.body?.checkInDate) patch.checkInDate = req.body.checkInDate;
     if (req.body?.checkInTime) patch.checkInTime = req.body.checkInTime;
 
@@ -538,45 +502,12 @@ app.put('/api/checkin/:id', async (req, res) => {
     if (!r.matchedCount) return res.status(404).json({ ok: false, error: 'not found' });
 
     res.json({ ok: true });
-
   } catch (e) {
     console.error('PUT /api/checkin/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// NEW: Check-in update by stayKey
-app.put('/api/checkin/by-stay-key/:stayKey', async (req, res) => {
-  try {
-    await ensureDb();
-    if (!checkinsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-
-    const stayKey = String(req.params.stayKey || '').trim();
-    if (!stayKey) return res.status(400).json({ ok: false, error: 'missing stayKey' });
-
-    const patch = {};
-    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
-    if (req.body?.contact !== undefined) patch.contact = String(req.body.contact).trim();
-    if (req.body?.room !== undefined) {
-      patch.room = Array.isArray(req.body.room)
-        ? req.body.room.map(Number)
-        : String(req.body.room).split(',').map(s => Number(s.trim())).filter(Boolean);
-    }
-    if (req.body?.rate !== undefined) patch.rate = Number(req.body.rate) || 0;
-    if (req.body?.checkInDate !== undefined) patch.checkInDate = String(req.body.checkInDate).slice(0, 10);
-    if (req.body?.checkInTime !== undefined) patch.checkInTime = String(req.body.checkInTime).trim();
-    patch.updatedAt = new Date().toISOString();
-
-    const r = await checkinsCol.updateOne({ stayKey }, { $set: patch });
-    if (!r.matchedCount) return res.status(404).json({ ok: false, error: 'stayKey not found' });
-
-    res.json({ ok: true, matched: r.matchedCount, modified: r.modifiedCount });
-
-  } catch (e) {
-    console.error('PUT /api/checkin/by-stay-key/:stayKey failed:', e);
-    res.status(500).json({ ok: false, error: String(e) });
-  }
-});
 
 // Reservation create (MongoDB reservations collection)
 app.post('/api/reservation', async (req, res) => {
@@ -592,6 +523,7 @@ app.post('/api/reservation', async (req, res) => {
       createdAt: new Date().toISOString()
     };
     const r = await reservationsCol.insertOne(doc);
+    // Future: sseBroadcast('reservations', {...}) if adding client channel
     res.json({ ok: true, id: String(r.insertedId) });
   } catch (e) {
     console.error('POST /api/reservation failed:', e);
@@ -610,8 +542,8 @@ app.delete('/api/reservation/:id', async (req, res) => {
 
     const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
     if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
+    // Future: sseBroadcast('reservations', {...}) if adding client channel
     res.json({ ok: true });
-
   } catch (e) {
     console.error('DELETE /api/reservation/:id failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -637,22 +569,22 @@ app.post('/api/checkout', async (req, res) => {
     const result = await checkoutsCol.insertOne(doc);
 
     // 2. Delete from checkins by matching name + room + checkInDate
-    const rooms = Array.isArray(body.room) ? body.room.map(Number) : [Number(body.room)];
     const delResult = await checkinsCol.deleteOne({
       name: String(body.name || "").trim(),
-      room: { $in: rooms },
+      room: { $in: (Array.isArray(body.room) ? body.room : [Number(body.room)]) },
       checkInDate: String(body.checkInDate || "").trim()
     });
 
     console.log("Checkout: inserted", result.insertedId, "deleted checkins:", delResult.deletedCount);
 
     res.json({ ok: true, id: String(result.insertedId), deleted: delResult.deletedCount });
-
   } catch (e) {
     console.error('POST /api/checkout failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+
 
 (async () => {
   console.log('[Boot] Starting server', { PORT, DB_NAME, COLLECTION, hasMongoUri: !!MONGO_URI });

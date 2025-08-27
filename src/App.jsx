@@ -650,102 +650,137 @@ try {
 
 // Then attempt to update the on-disk checkin JSON file for this booking (if storage connected)
 try {
-  const base = await getBaseFolder();
-  if (base) {
-    const checkInISO = (editGuest.guest?.checkIn || '').slice(0,10) || ymd(new Date());
-    const origName = String(editGuest.guest?.name || '').trim();
-    const normalizedOrig = origName.toLowerCase();
-    const stayKey = `${checkInISO}::${normalizedOrig}`;
+const base = await getBaseFolder();
+if (base) {
+const checkInISO =
+(editGuest.guest?.checkIn || "").slice(0, 10) || ymd(new Date()); 
+const checkinDir = await ensurePath(base, ["Checkins", checkInISO]);
+let foundOld = null;
+  for await (const [entryName, entryHandle] of checkinDir.entries()) {
+    if (entryHandle.kind !== "file" || !entryName.endsWith(".json")) continue;
+    try {
+      const f = await entryHandle.getFile();
+      const data = JSON.parse(await f.text());
+      const dataName = String(data.name || "").trim().toLowerCase();
+      const origName = String(editGuest.guest?.name || "").trim().toLowerCase();
+      const dataRooms = Array.isArray(data.room)
+        ? data.room.map(Number)
+        : [Number(data.room)];
+      // Match by original name and at least one overlapping room
+      if (dataName === origName && dataRooms.some(r => origRooms.includes(r))) {
+        foundOld = { entryName, data };
+        break;
+      }
+    } catch (err) {
+      continue;
+    }
+  }[1]
 
-    // 1) Rewrite ALL Checkins files for this stayKey/date
-    const checkinDir = await ensurePath(base, ['Checkins', checkInISO]);
-    const newSafe = String(editNameInput).replace(/[^\w\-]+/g, '_');
-    const roomsKeyNew = newRooms.join('_');
-    const newPayloadPatch = {
+  if (foundOld) {
+    const newData = {
+      ...foundOld.data,
       name: editNameInput,
       room: newRooms,
-      rate: Number(editRateInput) || 0,
-      edited: true,
-      stayKey // keep original stayKey even if name changed
-    };
-
-    const toDelete = [];
-    const toWrite = [];
-    for await (const [entryName, entryHandle] of checkinDir.entries()) {
-      if (entryHandle.kind !== 'file' || !entryName.endsWith('.json')) continue;
+      rate: Number(editRateInput) || Number(foundOld.data.rate) || 0,
+      edited: true
+    };[1]
+    const safe = String(editNameInput).replace(/[^\w\-]+/g, "_");
+    const roomsKeyNew = newRooms.join("_");
+    const newFileName = `checkin-${safe}-${roomsKeyNew}-${checkInISO}.json`;[1]
+    await writeJSON(checkinDir, newFileName, newData);[1]
+    // remove the old file if name/rooms changed
+    if (foundOld.entryName !== newFileName) {
       try {
-        const f = await entryHandle.getFile();
-        const data = JSON.parse(await f.text());
-        const dataStay = data.stayKey || `${(data.checkIn || '').slice(0,10)}::${String(data.name||'').trim().toLowerCase()}`;
-        // Match by stayKey
-        if (dataStay === stayKey) {
-          const merged = { ...data, ...newPayloadPatch };
-          const newFileName = `checkin-${newSafe}-${roomsKeyNew}-${checkInISO}.json`;
-          toWrite.push({ newFileName, merged });
-          if (entryName !== newFileName) toDelete.push(entryName);
-        }
-      } catch {}
-    }
-    for (const w of toWrite) { await writeJSON(checkinDir, w.newFileName, w.merged); }
-    for (const del of toDelete) { try { await checkinDir.removeEntry(del); } catch {} }
-
-    // 2) Update RentCollections entries by stayKey across dates
-    const rentRoot = await ensurePath(base, ['RentCollections']);
-    for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
-      if (dateHandle.kind !== 'directory') continue;
-      for await (const [rentFileName, rentFileHandle] of dateHandle.entries()) {
-        if (rentFileHandle.kind !== 'file' || !rentFileName.endsWith('.json')) continue;
-        try {
-          const rf = await rentFileHandle.getFile();
-          const rentData = JSON.parse(await rf.text());
-          const rStay = rentData.stayKey ||
-            (rentData.date ? `${(rentData.date.slice(0,10))}::${String(rentData.name||'').trim().toLowerCase()}` : null);
-          const paidRooms = Array.isArray(rentData.room) ? rentData.room.map(Number) : [Number(rentData.room)];
-          const intersects = paidRooms.some(pr => origRooms.includes(Number(pr)));
-          const nameMatch = String(rentData.name||'').trim().toLowerCase() === normalizedOrig;
-
-          if ((rStay && rStay === stayKey) || (!rStay && nameMatch && intersects)) {
-            const updatedRent = { ...rentData, name: editNameInput, room: newRooms, stayKey };
-            await writeJSON(dateHandle, rentFileName, updatedRent);
-          }
-        } catch {}
+        await checkinDir.removeEntry(foundOld.entryName);
+      } catch (e) {
+        console.warn("Failed to remove old checkin file", e);
       }
-    }
+    }[1]
 
-    // 3) Mirror both updates to backend by stayKey
+    // Also update RentCollections so previous payments map to the new rooms
     try {
-      const API_BASE =
-        window.__MONGO_API_BASE__ ||
-        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-        '/api';
-
-      // Update check-in by stayKey
-      await fetch(`${API_BASE}/checkin/by-stay-key/${encodeURIComponent(stayKey)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editNameInput,
-          room: newRooms,
-          rate: Number(editRateInput) || 0
-        })
-      }).catch(() => {});
-
-      // Remap rent-payment rows by stayKey
-      await fetch(`${API_BASE}/rent-payment/remap-by-stay-key`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stayKey,
-          name: editNameInput,
-          room: newRooms
-        })
-      }).catch(() => {});
-    } catch (e) {
-      console.warn('Backend mirror by stayKey failed', e);
-    }
+      const rentRoot = await ensurePath(base, ["RentCollections"]);
+      for await (const [dateFolder, dateHandle] of rentRoot.entries()) {
+        if (dateHandle.kind !== "directory") continue;
+        for await (const [rentFileName, rentFileHandle] of dateHandle.entries()) {
+          if (rentFileHandle.kind !== "file" || !rentFileName.endsWith(".json"))
+            continue;
+          try {
+            const rf = await rentFileHandle.getFile();
+            const rentData = JSON.parse(await rf.text());
+            const paidRooms = Array.isArray(rentData.room)
+              ? rentData.room.map(Number)
+              : [Number(rentData.room)];
+            const paidName = String(rentData.name || "").trim().toLowerCase();
+            const origName = String(editGuest.guest?.name || "")
+              .trim()
+              .toLowerCase();
+            const intersects = paidRooms.some(pr =>
+              origRooms.includes(Number(pr))
+            );
+            if (intersects && paidName === origName) {
+              // update the rent entry's room to refer to the new rooms (group)
+              const updatedRent = { ...rentData, room: newRooms };
+              try {
+                await writeJSON(dateHandle, rentFileName, updatedRent);
+              } catch (err) {
+                console.warn("Failed to update rent file", rentFileName, err);
+              }
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "Failed to update RentCollections for edited booking",
+        err
+      );
+    }[1]
   }
+}
+} catch (err) {
+console.warn("Failed to persist edit to disk:", err);
+}
+
+try {
+  const API_BASE =
+    window.__MONGO_API_BASE__ ||
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+    '/api';
+
+  // 1) Update server check-in (if id known)
+  const mongoId = editGuest?.guest?.id;
+  if (mongoId) {
+    await fetch(`${API_BASE}/checkin/${encodeURIComponent(mongoId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: editNameInput,
+        room: newRooms,
+        rate: Number(editRateInput) || 0,
+        contact: editGuest.guest?.contact || '',
+        checkInDate: editGuest.guest?.checkInDate || '',
+        checkInTime: editGuest.guest?.checkInTime || ''
+      })
+    }).catch(() => {});
+  }
+
+  // 2) Remap existing server rent rows for this stay (optional but recommended)
+  await fetch(`${API_BASE}/rent-payment/remap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fromName: (editGuest.guest?.name || '').trim(),
+      toName: editNameInput.trim(),
+      fromRooms: origRooms,
+      toRooms: newRooms,
+      sinceYmd: (editGuest.guest?.checkIn || '').slice(0, 10)
+    })
+  }).catch(() => {});
 } catch (e) {
-  console.warn('Resync after edit failed', e);
+  console.warn('server mirrors after edit failed', e);
 }
 
 
@@ -1320,9 +1355,6 @@ setRefreshKey(k => k + 1);
 e.preventDefault();
 if (!form.room) return alert("Select a room");
 if (!form.contact || String(form.contact).trim() === "") return alert("Please enter contact number");
-const checkInISO = now.toISOString().slice(0,10);
-const normalizedName = String(form.name || 'Guest').trim().toLowerCase();
-const stayKey = `${checkInISO}::${normalizedName}`;
 
 const now = new Date();
 const checkInDate = now.toLocaleDateString();
@@ -1348,7 +1380,7 @@ contact: form.contact,
 checkIn: now.toISOString(),
 checkInDate,
 checkInTime,
-rate: Number(form.rate) || 0,
+rate: Number(form.rate) || 0
 }
 }
 : r
@@ -1384,8 +1416,7 @@ room: roomsToOccupy,
 checkIn: now.toISOString(),
 checkInDate,
 checkInTime,
-rate: Number(form.rate) || 0,
-stayKey
+rate: Number(form.rate) || 0
 });
 
 // MIRROR: check-in event
@@ -1404,8 +1435,7 @@ await fetch(`${API_BASE}/checkin`, {
     rate: Number(form.rate) || 0,
     checkInDate,
     checkInTime,
-    checkInDateTime: now.toISOString(),
-    stayKey
+    checkInDateTime: now.toISOString()
   })
 }).catch(() => {});
 } catch (err) {
@@ -3691,15 +3721,10 @@ function Accounts({ state }) {
       const roomsKey = roomsArr.join('_') || String(rentForm.room || '').replace(/[^\w\-]+/g, '_');
       const fileName = `rent-${rentForm.name.replace(/[^\w\-]+/g, "_")}-${roomsKey || 'room'}-${Date.now()}.json`;
 
-      const checkInYmd = findCheckInYMD(state, rentData.name, rentForm.room);
-const normalizedName = String(rentData.name || '').trim().toLowerCase();
-const stayKey = checkInYmd ? `${checkInYmd}::${normalizedName}` : null;
-
       const rentData = {
         ...rentForm,
         room: roomsArr.length ? roomsArr : (isNaN(Number(rentForm.room)) ? rentForm.room : [Number(rentForm.room)]),
         date: new Date().toISOString(),
-        stayKey
       };
 
       await writeJSON(rentDir, fileName, rentData);
@@ -3731,8 +3756,7 @@ const stayKey = checkInYmd ? `${checkInYmd}::${normalizedName}` : null;
             mode: rentData.mode || 'Cash',
             // Use YYYY-MM-DD for server-side sort consistency
             date: new Date().toISOString().slice(0, 10),
-            checkInYmd: checkInYmd || null,
-            stayKey
+            checkInYmd: checkInYmd || null
           })
         });
       } catch (mirrorErr) {
