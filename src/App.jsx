@@ -2803,7 +2803,8 @@ async function deleteReservationFile(date, room, name) {
 
 
 function Reservations({ state, setState }) {
-  const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
+  // Multiple rooms instead of single
+const [form, setForm] = useState({ name: '', place: '', rooms: [], date: '' });
   const [availableRooms, setAvailableRooms] = useState([]);
   const [search, setSearch] = useState(""); // 🔍 search query
 
@@ -2835,57 +2836,61 @@ function Reservations({ state, setState }) {
 
   // Add new reservation
   const addReservation = async (e) => {
-e.preventDefault();
-if (!form.name || !form.place || !form.room || !form.date) {
-return alert('Please fill all fields');
-}
-
-const resObj = {
-name: form.name,
-place: form.place,
-room: Number(form.room),
-date: form.date,
-};
-
-const newState = { ...state };
-if (!newState.reservations) newState.reservations = [];
-newState.reservations.push(resObj);
-
-setForm({ name: '', place: '', room: '', date: '' });
-
-setState(newState);
-saveState(newState);
-// In App, after setState(newState) and saveState(newState):
-try {
-  if ('BroadcastChannel' in window) {
-    const bc = new BroadcastChannel('hotel_state');
-    bc.postMessage({ type: 'state:update', state: newState });
-    bc.close();
+  e.preventDefault();
+  if (!form.name || !form.place || !form.rooms.length || !form.date) {
+    return alert('Please fill all fields');
   }
-} catch {}
 
+  const newState = { ...state };
+  if (!newState.reservations) newState.reservations = [];
 
-persistReservation(resObj);
+  // Create reservation for each selected room
+  const resObjs = form.rooms.map(rn => ({
+    name: form.name,
+    place: form.place,
+    room: Number(rn),
+    date: form.date,
+  }));
 
-// MIRROR: reservation event (non-blocking)
-try {
-const API_BASE =
-window.MONGO_API_BASE ||
-(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-'/api';
-await fetch(`${API_BASE}/reservation`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: resObj.name,
-    place: resObj.place || '',
-    room: Number(resObj.room),
-    date: resObj.date
-  })
-}).catch(() => {});
-} catch (_) {
-// ignore mirror failures
-}
+  newState.reservations.push(...resObjs);
+  setForm({ name: '', place: '', rooms: [], date: '' });
+
+  setState(newState);
+  saveState(newState);
+
+  // Broadcast
+  try {
+    if ('BroadcastChannel' in window) {
+      const bc = new BroadcastChannel('hotel_state');
+      bc.postMessage({ type: 'state:update', state: newState });
+      bc.close();
+    }
+  } catch {}
+
+  // Persist each reservation
+  for (const res of resObjs) {
+    persistReservation(res);
+  }
+
+  // Mirror API
+  try {
+    const API_BASE =
+      window.MONGO_API_BASE ||
+      (typeof import.meta !== 'undefined' &&
+        import.meta.env &&
+        import.meta.env.VITE_MONGO_API_BASE) ||
+      '/api';
+
+    for (const res of resObjs) {
+      await fetch(`${API_BASE}/reservation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(res),
+      }).catch(() => {});
+    }
+  } catch (_) {
+    // ignore mirror failures
+  }
 };
 
   // Delete reservation with confirmation + disk removal
@@ -2984,19 +2989,39 @@ const checkInReservation = (res) => {
         />
 
         {/* Room dropdown */}
-        <select
-          className="input"
-          value={form.room}
-          onChange={e => setForm({ ...form, room: e.target.value })}
-          disabled={!form.date}
-        >
-          <option value="">Select a free room</option>
-          {availableRooms.map(num => (
-            <option key={num} value={num}>
-              {num} — Floor {String(num)[0]}
-            </option>
-          ))}
-        </select>
+        <div style={{ marginTop: 8 }}>
+  {Object.entries(
+    availableRooms.reduce((acc, roomNum) => {
+      const floor = String(roomNum)[0]; // floor from first digit
+      if (!acc[floor]) acc[floor] = [];
+      acc[floor].push(roomNum);
+      return acc;
+    }, {})
+  ).map(([floor, rooms]) => (
+    <div key={floor} style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 600 }}>Floor {floor}</div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {rooms.map(num => (
+          <label key={num} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={form.rooms.includes(num)}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setForm({ ...form, rooms: [...form.rooms, num] });
+                } else {
+                  setForm({ ...form, rooms: form.rooms.filter(r => r !== num) });
+                }
+              }}
+            />
+            Room {num}
+          </label>
+        ))}
+      </div>
+    </div>
+  ))}
+</div>
+
 
         <button className="btn primary" type="submit">Add</button>
       </form>
