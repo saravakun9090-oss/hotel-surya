@@ -8,6 +8,8 @@ import StorageSetup from './components/StorageSetup';
 import LiveUpdate from './LiveUpdate';
 import { hydrateStateFromDisk } from './services/diskSync';
 import { Line, Doughnut, Bar } from "react-chartjs-2";
+import { motion } from "framer-motion";
+
 
 
 import {
@@ -79,30 +81,35 @@ const Sidebar = () => {
   ];
 
   return (
-    <div className="w-64 h-screen flex flex-col bg-[var(--deep)] text-white p-4">
+    <div className="w-64 h-screen flex flex-col p-4 
+                    bg-white/10 backdrop-blur-md shadow-xl border-r border-white/20">
       {/* Logo */}
       <div className="mb-6">
-        <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
-        <p className="text-xs opacity-80">
+        <h1 className="text-lg font-bold text-white">🏨 HOTEL SURYA</h1>
+        <p className="text-xs text-gray-200/80">
           Manage check-ins, checkouts & reservations
         </p>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex flex-col space-y-2">
+      {/* Nav */}
+      <nav className="relative flex flex-col space-y-2">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
+
           return (
             <Link
               key={item.to}
               to={item.to}
-              className={`px-3 py-2 rounded-md transition ${
-                isActive
-                  ? "bg-[var(--cream)] text-[var(--deep)] font-semibold"
-                  : "hover:bg-[var(--cream)] hover:text-[var(--deep)]"
-              }`}
+              className="relative px-4 py-2 rounded-lg text-white font-medium"
             >
-              {item.label}
+              {isActive && (
+                <motion.div
+                  layoutId="activeBackground"
+                  className="absolute inset-0 rounded-lg bg-white/20 backdrop-blur-sm"
+                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{item.label}</span>
             </Link>
           );
         })}
