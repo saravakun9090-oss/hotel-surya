@@ -274,7 +274,7 @@ const checkInReservation = (res) => {
       flex: 1,
       overflowY: "auto",
       paddingRight: 4,
-      maxHeight: 250, // 🔑 set a height limit
+      maxHeight: 400, // 🔑 set a height limit
     }}
   >
     {recent.length === 0 && (
@@ -375,7 +375,7 @@ const checkInReservation = (res) => {
       flex: 1,
       overflowY: "auto",
       paddingRight: 4,
-      maxHeight: 250, // 🔑 set a height limit
+      maxHeight: 150, // 🔑 set a height limit
     }}
   >
     {todaysReservations.length === 0 && (
