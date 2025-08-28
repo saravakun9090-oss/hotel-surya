@@ -2774,9 +2774,11 @@ async function persistReservation(res) {
       console.warn("Storage not connected; skipping save to disk");
       return;
     }
-    const dir = await ensurePath(base, ['Reservations', res.date]);
-    const safe = String(res.name).replace(/[^\w\-]+/g, '_'); // sanitize filename
-    await writeJSON(dir, `reservation-${res.room}-${safe}.json`, res);
+    const dir = await ensurePath(base, ["Reservations", res.date]);
+    const safe = String(res.name).replace(/[^\w\-]+/g, "_"); // sanitize filename
+
+    // Save single file for multi-room booking
+    await writeJSON(dir, `reservation-${safe}.json`, res);
     console.log("Reservation saved to disk:", res);
   } catch (err) {
     console.error("Failed to save reservation to disk:", err);
@@ -2784,176 +2786,171 @@ async function persistReservation(res) {
 }
 
 // --- Delete a reservation file from the connected storage folder ---
-// Dedicated: remove 1 reservation file from disk
-async function deleteReservationFile(date, room, name) {
+async function deleteReservationFile(date, name) {
   try {
     const base = await getBaseFolder();
     if (!base) {
       console.warn("Storage not connected; skipping disk deletion");
       return;
     }
-    const dir = await ensurePath(base, ['Reservations', date]);
-    const safe = String(name).replace(/[^\w\-]+/g, '_');
-    await dir.removeEntry(`reservation-${room}-${safe}.json`);
-    console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
+    const dir = await ensurePath(base, ["Reservations", date]);
+    const safe = String(name).replace(/[^\w\-]+/g, "_");
+    await dir.removeEntry(`reservation-${safe}.json`);
+    console.log(`Deleted reservation file: reservation-${safe}.json`);
   } catch (err) {
     console.warn("Failed to delete reservation file from disk:", err);
   }
 }
 
-
 function Reservations({ state, setState }) {
-  // Multiple rooms instead of single
-const [form, setForm] = useState({ name: '', place: '', rooms: [], date: '' });
-  const [availableRooms, setAvailableRooms] = useState([]);
-  const [search, setSearch] = useState(""); // 🔍 search query
+  const [form, setForm] = useState({ name: "", place: "", rooms: [], date: "" });
+  const [availableRooms, setAvailableRooms] = useState({});
+  const [search, setSearch] = useState("");
+  const navigate = useNavigate();
 
-  
-  // --- Calculate available rooms for a given date ---
+  // --- Calculate available rooms per floor for a given date ---
   const updateAvailableRooms = (selectedDate) => {
     if (!selectedDate) {
-      setAvailableRooms([]);
+      setAvailableRooms({});
       return;
     }
 
-    const rooms = [];
+    const roomsByFloor = {};
 
-    for (const floor of Object.values(state.floors)) {
+    for (const [floorNum, floor] of Object.entries(state.floors)) {
+      const floorRooms = [];
       for (const room of floor) {
-        const isOccupied = room.status === 'occupied';
+        const isOccupied = room.status === "occupied";
         const isReservedThatDate = (state.reservations || []).some(
-          r => r.room === room.number && r.date === selectedDate
+          (r) =>
+            r.date === selectedDate &&
+            (r.rooms || []).includes(room.number)
         );
 
         if (!isOccupied && !isReservedThatDate) {
-          rooms.push(room.number);
+          floorRooms.push(room.number);
         }
       }
+      roomsByFloor[floorNum] = floorRooms;
     }
 
-    setAvailableRooms(rooms);
+    setAvailableRooms(roomsByFloor);
   };
 
   // Add new reservation
   const addReservation = async (e) => {
-  e.preventDefault();
-  if (!form.name || !form.place || !form.rooms.length || !form.date) {
-    return alert('Please fill all fields');
-  }
-
-  const newState = { ...state };
-  if (!newState.reservations) newState.reservations = [];
-
-  // Create reservation for each selected room
-  const resObjs = form.rooms.map(rn => ({
-    name: form.name,
-    place: form.place,
-    room: Number(rn),
-    date: form.date,
-  }));
-
-  newState.reservations.push(...resObjs);
-  setForm({ name: '', place: '', rooms: [], date: '' });
-
-  setState(newState);
-  saveState(newState);
-
-  // Broadcast
-  try {
-    if ('BroadcastChannel' in window) {
-      const bc = new BroadcastChannel('hotel_state');
-      bc.postMessage({ type: 'state:update', state: newState });
-      bc.close();
+    e.preventDefault();
+    if (!form.name || !form.place || !form.rooms.length || !form.date) {
+      return alert("Please fill all fields and select at least one room");
     }
-  } catch {}
 
-  // Persist each reservation
-  for (const res of resObjs) {
-    persistReservation(res);
-  }
+    const resObj = {
+      name: form.name,
+      place: form.place,
+      rooms: form.rooms.map(Number),
+      date: form.date,
+    };
 
-  // Mirror API
-  try {
-    const API_BASE =
-      window.MONGO_API_BASE ||
-      (typeof import.meta !== 'undefined' &&
-        import.meta.env &&
-        import.meta.env.VITE_MONGO_API_BASE) ||
-      '/api';
+    const newState = { ...state };
+    if (!newState.reservations) newState.reservations = [];
+    newState.reservations.push(resObj);
 
-    for (const res of resObjs) {
+    setForm({ name: "", place: "", rooms: [], date: "" });
+    setState(newState);
+    saveState(newState);
+
+    // Broadcast update
+    try {
+      if ("BroadcastChannel" in window) {
+        const bc = new BroadcastChannel("hotel_state");
+        bc.postMessage({ type: "state:update", state: newState });
+        bc.close();
+      }
+    } catch {}
+
+    // Persist reservation to disk
+    persistReservation(resObj);
+
+    // Mirror reservation to API
+    try {
+      const API_BASE =
+        window.MONGO_API_BASE ||
+        (typeof import.meta !== "undefined" &&
+          import.meta.env &&
+          import.meta.env.VITE_MONGO_API_BASE) ||
+        "/api";
       await fetch(`${API_BASE}/reservation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(res),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resObj),
       }).catch(() => {});
+    } catch (_) {
+      // ignore mirror failures
     }
-  } catch (_) {
-    // ignore mirror failures
-  }
-};
+  };
 
-  // Delete reservation with confirmation + disk removal
+  // Delete reservation
   const deleteReservation = async (i) => {
-  const res = state.reservations[i];
-  if (!res) return;
+    const res = state.reservations[i];
+    if (!res) return;
 
-  const confirmed = window.confirm(
-    `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRoom: ${res.room}\nDate: ${res.date}`
-  );
-  if (!confirmed) return;
+    const confirmed = window.confirm(
+      `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ""}\nRooms: ${res.rooms.join(", ")}\nDate: ${res.date}`
+    );
+    if (!confirmed) return;
 
-  const newState = { ...state };
-  newState.reservations.splice(i, 1);
-  setState(newState);
-  saveState(newState);
-  try {
-    if ('BroadcastChannel' in window) {
-      const bc = new BroadcastChannel('hotel_state');
-      bc.postMessage({ type: 'state:update', state: newState });
-      bc.close();
-    }
-  } catch {}
+    const newState = { ...state };
+    newState.reservations.splice(i, 1);
+    setState(newState);
+    saveState(newState);
 
-  await deleteReservationFile(res.date, res.room, res.name);
+    // Broadcast update
+    try {
+      if ("BroadcastChannel" in window) {
+        const bc = new BroadcastChannel("hotel_state");
+        bc.postMessage({ type: "state:update", state: newState });
+        bc.close();
+      }
+    } catch {}
 
-  // also delete from Mongo by composite key
-  try {
-    const API_BASE =
-      window.MONGO_API_BASE ||
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-      '/api';
-    await fetch(`${API_BASE}/reservation`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: String(res.name || '').trim(),
-        room: Number(res.room),
-        date: String(res.date || '').slice(0,10)
-      })
-    }).catch(() => {});
-  } catch {}
-};
+    // Delete reservation file
+    await deleteReservationFile(res.date, res.name);
 
+    // Delete from Mongo
+    try {
+      const API_BASE =
+        window.MONGO_API_BASE ||
+        (typeof import.meta !== "undefined" &&
+          import.meta.env &&
+          import.meta.env.VITE_MONGO_API_BASE) ||
+        "/api";
+      await fetch(`${API_BASE}/reservation`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: String(res.name || "").trim(),
+          date: String(res.date || "").slice(0, 10),
+        }),
+      }).catch(() => {});
+    } catch {}
+  };
 
-  const navigate = useNavigate();
-
-const checkInReservation = (res) => {
-  navigate('/checkin', {
-    state: {
-      prefName: res.name,
-      prefRoom: res.room
-    }
-  });
-};
+  const checkInReservation = (res) => {
+    navigate("/checkin", {
+      state: {
+        prefName: res.name,
+        prefRooms: res.rooms,
+      },
+    });
+  };
 
   // 🔍 Filter reservations based on search box
-  const filteredReservations = (state.reservations || []).filter(r => {
+  const filteredReservations = (state.reservations || []).filter((r) => {
     const q = search.toLowerCase();
     return (
       r.name.toLowerCase().includes(q) ||
       (r.place && r.place.toLowerCase().includes(q)) ||
-      String(r.room).includes(q) ||
+      (r.rooms && r.rooms.some((rm) => String(rm).includes(q))) ||
       r.date.includes(q)
     );
   });
@@ -2961,20 +2958,32 @@ const checkInReservation = (res) => {
   return (
     <div>
       <div>
-          <div style={{ paddingBottom: 10}} className="title">Reservations</div>
+        <div style={{ paddingBottom: 10 }} className="title">
+          Reservations
         </div>
-      <form style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} onSubmit={addReservation}>
+      </div>
+
+      {/* Reservation form */}
+      <form
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          marginBottom: 16,
+        }}
+        onSubmit={addReservation}
+      >
         <input
           className="input"
           placeholder="Guest name"
           value={form.name}
-          onChange={e => setForm({ ...form, name: e.target.value })}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
         <input
           className="input"
           placeholder="Place"
           value={form.place}
-          onChange={e => setForm({ ...form, place: e.target.value })}
+          onChange={(e) => setForm({ ...form, place: e.target.value })}
         />
 
         {/* Select date first */}
@@ -2982,77 +2991,99 @@ const checkInReservation = (res) => {
           className="input"
           type="date"
           value={form.date}
-          onChange={e => {
-            setForm({ ...form, date: e.target.value, room: '' });
+          onChange={(e) => {
+            setForm({ ...form, date: e.target.value, rooms: [] });
             updateAvailableRooms(e.target.value);
           }}
         />
 
-        {/* Room dropdown */}
-        <div style={{ marginTop: 8 }}>
-  {Object.entries(
-    availableRooms.reduce((acc, roomNum) => {
-      const floor = String(roomNum)[0]; // floor from first digit
-      if (!acc[floor]) acc[floor] = [];
-      acc[floor].push(roomNum);
-      return acc;
-    }, {})
-  ).map(([floor, rooms]) => (
-    <div key={floor} style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 600 }}>Floor {floor}</div>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        {rooms.map(num => (
-          <label key={num} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="checkbox"
-              checked={form.rooms.includes(num)}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setForm({ ...form, rooms: [...form.rooms, num] });
-                } else {
-                  setForm({ ...form, rooms: form.rooms.filter(r => r !== num) });
-                }
-              }}
-            />
-            Room {num}
-          </label>
+        {/* Room checkboxes by floor */}
+        {Object.entries(availableRooms).map(([floor, rooms]) => (
+          <div key={floor} style={{ marginBottom: 10 }}>
+            <div style={{ fontWeight: 600 }}>Floor {floor}</div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {rooms.map((num) => (
+                <label
+                  key={num}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    value={num}
+                    checked={form.rooms.includes(num)}
+                    onChange={(e) => {
+                      let updated = [...form.rooms];
+                      if (e.target.checked) {
+                        updated.push(num);
+                      } else {
+                        updated = updated.filter((r) => r !== num);
+                      }
+                      setForm({ ...form, rooms: updated });
+                    }}
+                  />
+                  Room {num}
+                </label>
+              ))}
+            </div>
+          </div>
         ))}
-      </div>
-    </div>
-  ))}
-</div>
 
-
-        <button className="btn primary" type="submit">Add</button>
+        <button className="btn primary" type="submit">
+          Add
+        </button>
       </form>
 
-       {/* 🔍 Search Box */}
+      {/* 🔍 Search Box */}
       <input
         className="input"
         style={{ marginBottom: 12 }}
         placeholder="Search reservations by name, place, room, or date"
         value={search}
-        onChange={e => setSearch(e.target.value)}
+        onChange={(e) => setSearch(e.target.value)}
       />
 
-
+      {/* Reservation List */}
       <div className="list">
         {(!state.reservations || state.reservations.length === 0) && (
-          <div style={{ color: 'var(--muted)' }}>No reservations</div>
+          <div style={{ color: "var(--muted)" }}>No reservations</div>
         )}
-        {state.reservations && state.reservations.map((r, i) => (
-          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        {filteredReservations.map((r, i) => (
+          <div
+            key={i}
+            className="card"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
             <div>
               <div style={{ fontWeight: 700 }}>
-                {r.name} - <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{r.place}</span>
+                {r.name} -{" "}
+                <span style={{ color: "var(--muted)", fontWeight: 700 }}>
+                  {r.place}
+                </span>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Room {r.room} — {r.date}
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                Rooms {r.rooms.join(", ")} — {r.date}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn primary" onClick={() => checkInReservation(r)}>Check-In</button>
-              <button className="btn ghost" onClick={() => deleteReservation(i)}>Delete</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn primary"
+                onClick={() => checkInReservation(r)}
+              >
+                Check-In
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => deleteReservation(i)}
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -3060,7 +3091,6 @@ const checkInReservation = (res) => {
     </div>
   );
 }
-
 // --- Backend mirror helpers for LiveUpdate sync ---
 // Reuse the same API_BASE resolution pattern used elsewhere
 const API_BASE =
