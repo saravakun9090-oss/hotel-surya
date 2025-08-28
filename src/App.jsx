@@ -1656,35 +1656,42 @@ if (reservationMatches.length) {
   });
 
   const roomBoxStyle = (r) => {
-    const bg =
-      r.status === "reserved" ? "rgba(255, 213, 128, 0.6)" :
+  const baseBg =
+    r.status === "reserved" ? "rgba(255, 213, 128, 0.6)" :
       r.status === "occupied" ? "rgba(139, 224, 164, 0.6)" :
-      "rgba(255, 255, 255, 0.6)";
-    const isDisabled = r.status === "occupied";
+    "rgba(255, 255, 255, 0.15)"; // frosty neutral white
+
+  const isDisabled = r.status === "occupied";
   const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
+
+  // If selected and FREE → turn blue
+  const selectedFree = isSelected && r.status !== "occupied" && r.status !== "reserved";
 
   return {
     cursor: isDisabled ? "not-allowed" : "pointer",
     height: 56,
-    borderRadius: 16,
+    borderRadius: 20,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 700,
     fontSize: 14,
-    color: '#000000ff',
-    background: bg,
-    backdropFilter: 'blur(14px) saturate(220%)', // more saturation for vibrance
-    WebkitBackdropFilter: 'blur(14px) saturate(220%)',
-    border: `1px solid ${isSelected ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)'}`,
-    boxShadow: isSelected 
-      ? 'inset 1px 1px 2px rgba(255,255,255,0.6), inset -1px -1px 2px rgba(0,0,0,0.25), 0 0 12px rgba(46,76,65,0.4)' 
-      : 'inset 1px 1px 2px rgba(255,255,255,0.5), inset -1px -1px 2px rgba(0,0,0,0.25), 0 4px 14px rgba(0,0,0,0.3)',
-    transition: 'all 150ms ease',
+    color: '#fff',
+    background: selectedFree ? "rgba(0, 132, 255, 0.3)" : baseBg, // frosted blue if selected & free
+    backdropFilter: 'blur(18px) saturate(200%)',
+    WebkitBackdropFilter: 'blur(18px) saturate(200%)',
+    border: selectedFree 
+      ? '1.5px solid rgba(0, 132, 255, 0.6)'
+      : `1.2px solid rgba(255,255,255,0.25)`,
+    boxShadow: selectedFree 
+      ? 'inset 1px 1px 3px rgba(255,255,255,0.6), inset -2px -2px 4px rgba(0,0,0,0.25), 0 0 14px rgba(0,132,255,0.55)' 
+      : 'inset 1px 1px 3px rgba(255,255,255,0.5), inset -2px -2px 4px rgba(0,0,0,0.25), 0 4px 14px rgba(0,0,0,0.3)',
+    transition: 'all 180ms ease',
     transform: isSelected ? 'translateY(-2px)' : 'none',
     opacity: isDisabled ? 0.75 : 1,
-    };
   };
+};
+
 
   useEffect(() => () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }, []);
 
