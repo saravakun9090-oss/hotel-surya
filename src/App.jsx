@@ -82,7 +82,7 @@ const Sidebar = () => {
 
   return (
     <div className="w-64 h-screen flex flex-col p-4 
-                    bg-[var(--deep)] text-white shadow-xl border-r border-[var(--cream)]/20">
+                    bg-[var(--deep)] text-white shadow-xl border-r border-[var(--cream)]/20 background-#344239">
       {/* Logo */}
       <div className="mb-6">
         <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
