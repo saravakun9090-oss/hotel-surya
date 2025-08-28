@@ -1673,7 +1673,7 @@ if (reservationMatches.length) {
     justifyContent: 'center',
     fontWeight: 700,
     fontSize: 14,
-    color: '#fff',
+    color: '#000000ff',
     background: bg,
     backdropFilter: 'blur(12px) saturate(180%)',
     WebkitBackdropFilter: 'blur(12px) saturate(180%)',
