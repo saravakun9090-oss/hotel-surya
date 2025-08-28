@@ -306,7 +306,7 @@ const checkInReservation = (res) => {
           fontWeight: 700,
           fontSize: 14,
           marginBottom: 6,
-          color: "var(--muted)",
+          color: "var(--muted)"
         }}
       >
         Floor {floorNum}
@@ -315,24 +315,22 @@ const checkInReservation = (res) => {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4,1fr)",
-          gap: 8,
+          gap: 8
         }}
       >
         {layoutFloors[floorNum].map((r) => {
-          // pick a tinted glass background depending on status
-          const bg =
+          // define glassy background color per status
+          let bg =
             r.status === "occupied"
-              ? "rgba(113, 191, 129, 0.25)" // soft green tint
+              ? "rgba(0, 180, 90, 0.25)" // green tint
               : r.status === "reserved"
-              ? "rgba(240, 185, 80, 0.25)" // soft amber tint
-              : "rgba(255, 255, 255, 0.15)"; // neutral glass for free
+              ? "rgba(240, 180, 0, 0.25)" // amber tint
+              : "rgba(255, 255, 255, 0.15)"; // free: light frosted glass
 
-          const border =
-            r.status === "occupied"
-              ? "1px solid rgba(113,191,129,0.4)"
-              : r.status === "reserved"
-              ? "1px solid rgba(240,185,80,0.4)"
-              : "1px solid rgba(255,255,255,0.25)";
+          let textColor =
+            r.status === "occupied" || r.status === "reserved"
+              ? "#fff"
+              : "#000";
 
           return (
             <div
@@ -345,13 +343,13 @@ const checkInReservation = (res) => {
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: 12,
-                color: "#fff", // white text for glass style
+                color: textColor,
                 background: bg,
-                backdropFilter: "blur(12px)", // frosted glass
-                WebkitBackdropFilter: "blur(12px)", // Safari support
-                border,
+                backdropFilter: "blur(8px)",
+                WebkitBackdropFilter: "blur(8px)",
+                border: "1px solid rgba(255,255,255,0.2)",
                 boxShadow:
-                  "inset 1px 1px 4px rgba(255,255,255,0.3), inset -1px -1px 4px rgba(0,0,0,0.3), 0 4px 10px rgba(0,0,0,0.25)",
+                  "inset 2px 2px 6px rgba(255,255,255,0.25), inset -2px -2px 6px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.25)"
               }}
             >
               {floorNum}
@@ -363,6 +361,7 @@ const checkInReservation = (res) => {
     </div>
   ))}
 </div>
+
 
 
 
