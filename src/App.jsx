@@ -81,39 +81,30 @@ const Sidebar = () => {
   ];
 
   return (
-    <div className="w-64 h-screen flex flex-col p-4 
-                    bg-white/10 backdrop-blur-xl shadow-xl border-r border-white/20">
+    <div className="w-64 h-screen flex flex-col bg-[var(--deep)] text-white p-4">
       {/* Logo */}
       <div className="mb-6">
-        <h1 className="text-lg font-bold text-white">🏨 HOTEL SURYA</h1>
-        <p className="text-xs text-gray-200/80">
+        <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
+        <p className="text-xs opacity-80">
           Manage check-ins, checkouts & reservations
         </p>
       </div>
 
-      {/* Nav */}
-      <nav className="relative flex flex-col space-y-2">
+      {/* Navigation */}
+      <nav className="flex flex-col space-y-2">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
-
           return (
             <Link
               key={item.to}
               to={item.to}
-              className="relative px-4 py-2 rounded-lg text-white font-medium"
+              className={`px-3 py-2 rounded-md transition ${
+                isActive
+                  ? "bg-[var(--cream)] text-[var(--deep)] font-semibold"
+                  : "hover:bg-[var(--cream)] hover:text-[var(--deep)]"
+              }`}
             >
-              {isActive && (
-                <motion.div
-                  layoutId="activeBackground"
-                  className="absolute inset-0 rounded-lg 
-                             bg-white/10 backdrop-blur-md 
-                             border border-white/30 shadow-lg
-                             before:absolute before:inset-0 before:rounded-lg 
-                             before:bg-gradient-to-tr before:from-white/30 before:to-transparent"
-                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                />
-              )}
-              <span className="relative z-10">{item.label}</span>
+              {item.label}
             </Link>
           );
         })}
