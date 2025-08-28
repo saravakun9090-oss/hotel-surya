@@ -75,7 +75,6 @@ const Sidebar = () => {
     { to: "/checkin", label: "Check-in" },
     { to: "/checkout", label: "Check-out" },
     { to: "/reservations", label: "Reservations" },
-    { to: "/floors", label: "Floors" },
     { to: "/storage", label: "Storage" },
     { to: "/accounts", label: "Accounts" },
     { to: "/analysis", label: "Analysis" },
@@ -400,124 +399,7 @@ const checkInReservation = (res) => {
   );
 }
 
-function FloorsPage({ state, setState, floorNumber }) {
-  const [selected, setSelected] = useState(null);
 
-  // Get today’s date in YYYY-MM-DD for comparison
-  const todayISO = ymd();
-
-  // Filter reservations for today on this floor
-  const reservationsToday = (state.reservations || []).filter(
-    res => res.date === todayISO
-  );
-
-  // Build the floor array, marking rooms reserved where applicable
-  const floor = state.floors[floorNumber].map(r => {
-    const res = reservationsToday.find(rr => rr.room === r.number);
-    if (res && r.status === 'free') {
-      return { ...r, status: 'reserved', reservedFor: { name: res.name, from: res.date } };
-    }
-    return r;
-  });
-
-  const onRoomClick = (room) => setSelected(room);
-
-  const updateRoom = (number, patch) => {
-    const newState = { ...state, floors: { ...state.floors } };
-    newState.floors[floorNumber] =
-      state.floors[floorNumber].map(r => (r.number === number ? { ...r, ...patch } : r));
-    setState(newState);
-    saveState(newState);
-    // In App, after setState(newState) and saveState(newState):
-try {
-  if ('BroadcastChannel' in window) {
-    const bc = new BroadcastChannel('hotel_state');
-    bc.postMessage({ type: 'state:update', state: newState });
-    bc.close();
-  }
-} catch {}
-
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Floor {floorNumber}</h3>
-        <div style={{ color: 'var(--muted)' }}>Rooms: {floor.length}</div>
-      </div>
-      <div style={{ height: 12 }} />
-      <div className="room-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-        {floor.map(r => (
-          <RoomCard key={r.number} room={r} onClick={onRoomClick} />
-        ))}
-      </div>
-
-      {selected && (
-        <Modal onClose={() => setSelected(null)}>
-          <h4>Room {selected.number}</h4>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Status: {selected.status}</div>
-          <div style={{ height: 12 }} />
-
-          {selected.status === 'free' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              {/* Only Check-In is available for free rooms now */}
-              <Link to="/checkin" state={{ room: selected.number }} className="btn primary">
-                Check-In
-              </Link>
-            </div>
-          )}
-
-          {selected.status === 'reserved' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  updateRoom(selected.number, {
-                    status: 'occupied',
-                    guest: {
-                      name: selected.reservedFor?.name || 'Guest',
-                      contact: '',
-                      checkIn: new Date().toISOString(),
-                      id: ''
-                    },
-                    reservedFor: null
-                  });
-                  setSelected(null);
-                }}
-              >
-                Check-In Reserved
-              </button>
-            </div>
-          )}
-
-          {selected.status === 'occupied' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Link to="/checkout" state={{ room: selected.number }} className="btn primary">
-                Check-Out
-              </Link>
-            </div>
-          )}
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function FloorsContainer({ state, setState }) {
-  const floors = Object.keys(state.floors).map(f => Number(f));
-  return (
-    <div>
-      <h2>Floors — swipe left / right</h2>
-      <div className="floor-scroll">
-        {floors.map(f => (
-          <div className="floor" key={f}>
-            <FloorsPage state={state} setState={setState} floorNumber={f} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // Helper functions
 const pad2 = (n) => String(n).padStart(2, "0");
