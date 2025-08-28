@@ -2818,6 +2818,7 @@ async function persistReservation(res) {
 }
 
 // --- Delete a reservation file from the connected storage folder ---
+// Dedicated: remove 1 reservation file from disk
 async function deleteReservationFile(date, room, name) {
   try {
     const base = await getBaseFolder();
@@ -2826,51 +2827,14 @@ async function deleteReservationFile(date, room, name) {
       return;
     }
     const dir = await ensurePath(base, ['Reservations', date]);
-    const safe = String(name).replace(/[^\w\-]+/g, '_'); // same filename sanitization
+    const safe = String(name).replace(/[^\w\-]+/g, '_');
     await dir.removeEntry(`reservation-${room}-${safe}.json`);
     console.log(`Deleted reservation file: reservation-${room}-${safe}.json`);
   } catch (err) {
     console.warn("Failed to delete reservation file from disk:", err);
   }
-
-  const todayISO = (new Date()).toISOString().slice(0,10);
-const roomsSet = new Set(roomsToOccupy.map(Number));
-const reservationMatches = (state.reservations || []).filter(
-  r => roomsSet.has(Number(r.room)) && r.date === todayISO
-);
-
-if (reservationMatches.length) {
-  newState.reservations = (state.reservations || []).filter(
-    r => !(roomsSet.has(Number(r.room)) && r.date === todayISO)
-  );
-
-  for (const rm of reservationMatches) {
-    // 1) remove from disk (already in code)
-    await deleteReservationFile(rm.date, rm.room, rm.name);
-
-    // 2) remove from Mongo by composite key
-    try {
-      const API_BASE =
-        window.MONGO_API_BASE ||
-        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-        '/api';
-
-      await fetch(`${API_BASE}/reservation`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: String(rm.name || '').trim(),
-          room: Number(rm.room),
-          date: String(rm.date || '').slice(0,10)
-        })
-      }).catch(() => {});
-    } catch {
-      // best-effort; ignore failures to keep UI responsive
-    }
-  }
 }
 
-}
 
 function Reservations({ state, setState }) {
   const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
@@ -2960,31 +2924,46 @@ await fetch(`${API_BASE}/reservation`, {
 
   // Delete reservation with confirmation + disk removal
   const deleteReservation = async (i) => {
-    const res = state.reservations[i];
-    if (!res) return;
+  const res = state.reservations[i];
+  if (!res) return;
 
-    const confirmed = window.confirm(
-      `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRoom: ${res.room}\nDate: ${res.date}`
-    );
-    if (!confirmed) return;
+  const confirmed = window.confirm(
+    `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRoom: ${res.room}\nDate: ${res.date}`
+  );
+  if (!confirmed) return;
 
-    const newState = { ...state };
-    newState.reservations.splice(i, 1);
-    setState(newState);
-    saveState(newState);
-    // In App, after setState(newState) and saveState(newState):
-try {
-  if ('BroadcastChannel' in window) {
-    const bc = new BroadcastChannel('hotel_state');
-    bc.postMessage({ type: 'state:update', state: newState });
-    bc.close();
-  }
-} catch {}
+  const newState = { ...state };
+  newState.reservations.splice(i, 1);
+  setState(newState);
+  saveState(newState);
+  try {
+    if ('BroadcastChannel' in window) {
+      const bc = new BroadcastChannel('hotel_state');
+      bc.postMessage({ type: 'state:update', state: newState });
+      bc.close();
+    }
+  } catch {}
 
+  await deleteReservationFile(res.date, res.room, res.name);
 
-    // ✅ Remove from disk
-    await deleteReservationFile(res.date, res.room, res.name);
-  };
+  // also delete from Mongo by composite key
+  try {
+    const API_BASE =
+      window.MONGO_API_BASE ||
+      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+      '/api';
+    await fetch(`${API_BASE}/reservation`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: String(res.name || '').trim(),
+        room: Number(res.room),
+        date: String(res.date || '').slice(0,10)
+      })
+    }).catch(() => {});
+  } catch {}
+};
+
 
   const navigate = useNavigate();
 
