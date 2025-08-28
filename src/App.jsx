@@ -1656,30 +1656,37 @@ if (reservationMatches.length) {
   });
 
   const roomBoxStyle = (r) => {
-    const bg =
-      r.status === "reserved" ? "rgba(255, 213, 128, 0.6)" :
-      r.status === "occupied" ? "rgba(139, 224, 164, 0.6)" :
-      "rgba(255, 255, 255, 0.6)";
-    const isDisabled = r.status === "occupied";
+  const bg =
+    r.status === "reserved" ? "rgba(255, 213, 128, 0.15)" :
+    r.status === "occupied" ? "rgba(139, 224, 164, 0.15)" :
+    "rgba(255, 255, 255, 0.12)";
+
+  const isDisabled = r.status === "occupied";
   const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
-    return {
-      cursor: isDisabled ? "not-allowed" : "pointer",
-      height: 56,
-      borderRadius: 10,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontWeight: 800,
-      color: '#08251f',
-      background: bg,
-      backdropFilter: 'saturate(120%) blur(2px)',
-      border: `2px solid ${isSelected ? 'var(--deep)' : 'rgba(0,0,0,0.08)'}`,
-      boxShadow: isSelected ? '0 0 0 3px rgba(46,76,65,0.15)' : '0 4px 10px rgba(0,0,0,0.06)',
-      transition: 'all 120ms ease',
-      transform: isSelected ? 'translateY(-1px)' : 'none',
-      opacity: isDisabled ? 0.85 : 1,
-    };
+
+  return {
+    cursor: isDisabled ? "not-allowed" : "pointer",
+    height: 56,
+    borderRadius: 16,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 700,
+    fontSize: 14,
+    color: '#fff',
+    background: bg,
+    backdropFilter: 'blur(12px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+    border: `1px solid ${isSelected ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.25)'}`,
+    boxShadow: isSelected 
+      ? 'inset 1px 1px 2px rgba(255,255,255,0.4), inset -1px -1px 2px rgba(0,0,0,0.2), 0 0 8px rgba(46,76,65,0.3)' 
+      : 'inset 1px 1px 2px rgba(255,255,255,0.35), inset -1px -1px 2px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.25)',
+    transition: 'all 150ms ease',
+    transform: isSelected ? 'translateY(-2px)' : 'none',
+    opacity: isDisabled ? 0.7 : 1,
   };
+};
+
 
   useEffect(() => () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }, []);
 
@@ -1813,47 +1820,43 @@ if (reservationMatches.length) {
 
     <div style={{ display: 'flex', gap: 20 }}>
       {/* LEFT: Rooms grid */}
-      {/* LEFT: Rooms grid */}
-<div style={{ flex: 1 }}>
-  <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-    <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>
-      Rooms Today
-    </div>
+      <div style={{ flex: 1 }}>
+        <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+          <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>Rooms Today</div>
 
-    <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
-      <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
-      <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
-      <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
-    </div>
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+            <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
+            <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
+            <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
+          </div>
 
-    {Object.keys(roomsByFloor).map(floorNum => (
-      <div key={floorNum} style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-          Floor {floorNum}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          {roomsByFloor[floorNum].map(r => (
-            <div
-              key={r.number}
-              style={roomBoxStyle(r)}
-              title={
-                r.status === 'reserved'
-                  ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                  : r.status === 'occupied'
-                  ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                  : 'Free'
-              }
-              onClick={() => handleRoomClick(r)}
-            >
-              {r.number}
+          {Object.keys(roomsByFloor).map(floorNum => (
+            <div key={floorNum} style={{ marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
+                Floor {floorNum}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                {roomsByFloor[floorNum].map(r => (
+                  <div
+                    key={r.number}
+                    style={roomBoxStyle(r)}
+                    title={
+                      r.status === 'reserved'
+                        ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+                        : r.status === 'occupied'
+                        ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                        : 'Free'
+                    }
+                    onClick={() => handleRoomClick(r)}
+                  >
+                    {r.number}
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
       </div>
-    ))}
-  </div>
-</div>
-
 
       {/* RIGHT: Check-in form */}
       <div style={{ flex: 1 }}>
