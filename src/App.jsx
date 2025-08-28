@@ -338,12 +338,12 @@ const checkInReservation = (res) => {
               key={r.number}
               className={`room ${r.status}`}
               style={{
-                height: 60,
+                height: 50,
                 fontWeight: 700,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                borderRadius: 12,
+                borderRadius: 10,
                 color: textColor,
                 background: bg,
                 backdropFilter: "blur(8px)",
