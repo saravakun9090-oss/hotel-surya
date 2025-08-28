@@ -1433,15 +1433,46 @@ async function saveEditChanges() {
   });
 
   // Remove matching reservations for any of the rooms checked-in
-  const todayISO = (new Date()).toISOString().slice(0,10);
-  const roomsSet = new Set(roomsToOccupy.map(Number));
-  const reservationMatches = (state.reservations || []).filter(r => roomsSet.has(Number(r.room)) && r.date === todayISO);
-  if (reservationMatches.length) {
-    newState.reservations = (state.reservations || []).filter(r => !(roomsSet.has(Number(r.room)) && r.date === todayISO));
-    for (const rm of reservationMatches) {
-      await deleteReservationFile(rm.date, rm.room, rm.name);
-    }
+ const todayISO = (new Date()).toISOString().slice(0,10);
+const roomsSet = new Set(roomsToOccupy.map(Number));
+const reservationMatches = (state.reservations || []).filter(
+  r => roomsSet.has(Number(r.room)) && r.date === todayISO
+);
+
+if (reservationMatches.length) {
+  newState.reservations = (state.reservations || []).filter(
+    r => !(roomsSet.has(Number(r.room)) && r.date === todayISO)
+  );
+
+  // Delete reservation files on disk (already present)
+  for (const rm of reservationMatches) {
+    await deleteReservationFile(rm.date, rm.room, rm.name);
   }
+
+  // Mirror deletion to Mongo by composite key
+  try {
+    const API_BASE =
+      window.MONGO_API_BASE ||
+      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+      '/api';
+
+    // Fire sequentially to preserve order; or Promise.all if parallel is OK
+    for (const rm of reservationMatches) {
+      await fetch(`${API_BASE}/reservation`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: String(rm.name || '').trim(),
+          room: Number(rm.room),
+          date: String(rm.date || '').slice(0,10)
+        })
+      }).catch(() => {});
+    }
+  } catch {
+    // best-effort; ignore failures
+  }
+}
+
 
   // One and only server call: POST if no id, else PUT by id
   let mongoId = null;
@@ -2801,6 +2832,44 @@ async function deleteReservationFile(date, room, name) {
   } catch (err) {
     console.warn("Failed to delete reservation file from disk:", err);
   }
+
+  const todayISO = (new Date()).toISOString().slice(0,10);
+const roomsSet = new Set(roomsToOccupy.map(Number));
+const reservationMatches = (state.reservations || []).filter(
+  r => roomsSet.has(Number(r.room)) && r.date === todayISO
+);
+
+if (reservationMatches.length) {
+  newState.reservations = (state.reservations || []).filter(
+    r => !(roomsSet.has(Number(r.room)) && r.date === todayISO)
+  );
+
+  for (const rm of reservationMatches) {
+    // 1) remove from disk (already in code)
+    await deleteReservationFile(rm.date, rm.room, rm.name);
+
+    // 2) remove from Mongo by composite key
+    try {
+      const API_BASE =
+        window.MONGO_API_BASE ||
+        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+        '/api';
+
+      await fetch(`${API_BASE}/reservation`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: String(rm.name || '').trim(),
+          room: Number(rm.room),
+          date: String(rm.date || '').slice(0,10)
+        })
+      }).catch(() => {});
+    } catch {
+      // best-effort; ignore failures to keep UI responsive
+    }
+  }
+}
+
 }
 
 function Reservations({ state, setState }) {

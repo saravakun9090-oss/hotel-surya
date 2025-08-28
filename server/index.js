@@ -531,23 +531,35 @@ app.post('/api/reservation', async (req, res) => {
 });
 
 // Reservation delete
-app.delete('/api/reservation/:id', async (req, res) => {
+// Reservation delete by composite key: name + room + date
+app.delete('/api/reservation', async (req, res) => {
   try {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-    const id = String(req.params.id || '');
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-    if (!ObjectId.isValid(id)) return res.status(400).json({ ok: false, error: 'invalid id' });
 
-    const r = await reservationsCol.deleteOne({ _id: new ObjectId(id) });
-    if (!r.deletedCount) return res.status(404).json({ ok: false, error: 'not found' });
-    // Future: sseBroadcast('reservations', {...}) if adding client channel
-    res.json({ ok: true });
+    const b = req.body || {};
+    const name = String(b.name || '').trim();
+    const room = Number(b.room);
+    const date = String(b.date || '').slice(0, 10);
+
+    if (!name || !room || !date) {
+      return res.status(400).json({ ok: false, error: 'missing name, room, or date' });
+    }
+
+    // Optional: normalize collation for case-insensitive name match if needed:
+    // const result = await reservationsCol.deleteOne({ name, room, date }, { collation: { locale: 'en', strength: 2 } });
+
+    const result = await reservationsCol.deleteOne({ name, room, date });
+    if (!result.deletedCount) {
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+    res.json({ ok: true, deleted: result.deletedCount });
   } catch (e) {
-    console.error('DELETE /api/reservation/:id failed:', e);
+    console.error('DELETE /api/reservation (composite) failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 // Optional: record a checkout (MongoDB checkouts collection)
 app.post('/api/checkout', async (req, res) => {
