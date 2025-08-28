@@ -323,10 +323,7 @@ const checkInReservation = (res) => {
               ? "rgba(240, 180, 0, 0.25)" // amber tint
               : "rgba(255, 255, 255, 0.15)"; // free: light frosted glass
 
-          let textColor =
-            r.status === "occupied" || r.status === "reserved"
-              ? "#fff"
-              : "#000";
+          let textColor = "#000";
 
           return (
             <div
