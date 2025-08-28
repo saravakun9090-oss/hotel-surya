@@ -130,7 +130,7 @@ const Sidebar = () => {
 const StatCard = ({ title, value }) => (
   <div className="stat"   style={{backgroundColor: 'rgb(52, 66, 57)'}}>
     <div className="label" style={{color: '#ffffffcd'}}>{title}</div>
-    <div className="value" style={{color: '#000000cd'}}>{value}</div>
+    <div className="value" style={{color: '#ffffffff'}}>{value}</div>
   </div>
 );
 
