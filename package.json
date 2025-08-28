@@ -19,6 +19,7 @@
     "chart.js": "^4.5.0",
     "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^4.1.0",
+    "framer-motion": "^12.23.12",
     "gun": "^0.2020.1241",
     "react": "^19.1.1",
     "react-chartjs-2": "^5.3.0",
