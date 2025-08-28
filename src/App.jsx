@@ -258,41 +258,36 @@ const checkInReservation = (res) => {
       </div>
 
       {/* Recent Check-ins */}
-      <div className="card" style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column" }}>
-        <h3 style={{ margin: 0, marginBottom: 12 }}>Recent Check-ins</h3>
-        <div className="list" style={{ flex: 1, overflowY: "auto", paddingRight: 4 }}>
-          {recent.length === 0 && (
-            <div style={{ color: "var(--muted)" }}>No current guests</div>
-          )}
-          {recent.map((r, idx) => (
-            <div
-              key={idx}
-              className="card"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 12px",
-                borderRadius: 10,
-                marginBottom: 8,
-                background: "rgba(255,255,255,0.65)",
-                backdropFilter: "blur(6px)",
-                boxShadow: "0 2px 10px rgba(0,0,0,0.08)"
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 700 }}>{r.guest.name}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                  Room {r.room}
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                {new Date(r.guest.checkIn).toLocaleDateString()}
-              </div>
-            </div>
-          ))}
-        </div>
+<div
+  className="card"
+  style={{
+    flex: 1,
+    padding: 16,
+    display: "flex",
+    flexDirection: "column",
+  }}
+>
+  <h3 style={{ margin: 0, marginBottom: 12 }}>Recent Check-ins</h3>
+  <div
+    className="list"
+    style={{
+      flex: 1,
+      overflowY: "auto",
+      paddingRight: 4,
+      maxHeight: 250, // 🔑 set a height limit
+    }}
+  >
+    {recent.length === 0 && (
+      <div style={{ color: "var(--muted)" }}>No current guests</div>
+    )}
+    {recent.map((r, idx) => (
+      <div key={idx} className="card" style={{ marginBottom: 8, padding: "10px 12px" }}>
+        <div style={{ fontWeight: 700 }}>{r.guest.name}</div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Room {r.room}</div>
       </div>
+    ))}
+  </div>
+</div>
     </div>
 
     {/* RIGHT COLUMN */}
@@ -365,51 +360,39 @@ const checkInReservation = (res) => {
 
 
       {/* Today's Reservations */}
-      <div className="card" style={{ padding: 16, flex: 1, display: "flex", flexDirection: "column" }}>
-        <h3 style={{ margin: 0, marginBottom: 12 }}>Today's Reservations</h3>
-        <div style={{ flex: 1, overflowY: "auto", paddingRight: 4 }}>
-          {(todaysReservations.length === 0) && (
-            <div style={{ color: "var(--muted)" }}>No reservations for today</div>
-          )}
-          {todaysReservations.map((r, i) => (
-            <div
-              key={i}
-              className="card"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 12px",
-                borderRadius: 10,
-                marginBottom: 8,
-                background: "rgba(255,255,255,0.65)",
-                backdropFilter: "blur(6px)",
-                boxShadow: "0 2px 10px rgba(0,0,0,0.08)"
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 700 }}>
-                  {r.name} -{" "}
-                  <span style={{ color: "var(--muted)", fontWeight: 700 }}>
-                    {r.place}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                  Room {r.room} — {r.date}
-                </div>
-              </div>
-              <div>
-                <button
-                  className="btn primary"
-                  onClick={() => checkInReservation(r)}
-                >
-                  Check-In
-                </button>
-              </div>
-            </div>
-          ))}
+<div
+  className="card"
+  style={{
+    padding: 16,
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+  }}
+>
+  <h3 style={{ margin: 0, marginBottom: 12 }}>Today's Reservations</h3>
+  <div
+    style={{
+      flex: 1,
+      overflowY: "auto",
+      paddingRight: 4,
+      maxHeight: 250, // 🔑 set a height limit
+    }}
+  >
+    {todaysReservations.length === 0 && (
+      <div style={{ color: "var(--muted)" }}>No reservations for today</div>
+    )}
+    {todaysReservations.map((r, i) => (
+      <div key={i} className="card" style={{ marginBottom: 8, padding: "10px 12px" }}>
+        <div style={{ fontWeight: 700 }}>
+          {r.name} - <span style={{ color: "var(--muted)" }}>{r.place}</span>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+          Room {r.room} — {r.date}
         </div>
       </div>
+    ))}
+  </div>
+</div>
     </div>
   </div>
 </div>
