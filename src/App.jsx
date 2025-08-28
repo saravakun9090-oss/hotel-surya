@@ -1815,125 +1815,39 @@ if (reservationMatches.length) {
       {/* LEFT: Rooms grid */}
       {/* LEFT: Rooms grid */}
 <div style={{ flex: 1 }}>
-  <div
-    className="card"
-    style={{
-      padding: 14,
-      marginBottom: 12,
-      background: "rgba(255,255,255,0.05)",
-      backdropFilter: "blur(12px)",
-      WebkitBackdropFilter: "blur(12px)",
-      border: "1px solid rgba(255,255,255,0.15)",
-      borderRadius: 16,
-      boxShadow:
-        "inset 2px 2px 6px rgba(255,255,255,0.2), inset -2px -2px 6px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.3)"
-    }}
-  >
-    <div style={{ fontWeight: 800, marginBottom: 10, color: "var(--deep)" }}>
+  <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+    <div style={{ fontWeight: 800, marginBottom: 10, color: 'var(--deep)' }}>
       Rooms Today
     </div>
 
-    {/* Legend */}
-    <div
-      style={{
-        display: "flex",
-        gap: 16,
-        fontSize: 13,
-        color: "var(--muted)",
-        marginBottom: 8
-      }}
-    >
-      <div>
-        <span style={legendDot("rgba(255,255,255,0.6)")} /> Free
-      </div>
-      <div>
-        <span style={legendDot("rgba(255, 213, 128, 0.6)")} /> Reserved
-      </div>
-      <div>
-        <span style={legendDot("rgba(139, 224, 164, 0.6)")} /> Occupied
-      </div>
+    <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+      <div><span style={legendDot('rgba(255,255,255,0.6)')} /> Free</div>
+      <div><span style={legendDot('rgba(255, 213, 128, 0.6)')} /> Reserved</div>
+      <div><span style={legendDot('rgba(139, 224, 164, 0.6)')} /> Occupied</div>
     </div>
 
-    {/* Floors */}
-    {Object.keys(roomsByFloor).map((floorNum) => (
+    {Object.keys(roomsByFloor).map(floorNum => (
       <div key={floorNum} style={{ marginBottom: 14 }}>
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: 14,
-            color: "var(--muted)",
-            marginBottom: 8
-          }}
-        >
+        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
           Floor {floorNum}
         </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 10
-          }}
-        >
-          {roomsByFloor[floorNum].map((r) => {
-            // Glass tint per status
-            let bg =
-              r.status === "occupied"
-                ? "rgba(0, 180, 90, 0.25)"
-                : r.status === "reserved"
-                ? "rgba(240, 180, 0, 0.25)"
-                : "rgba(255, 255, 255, 0.15)";
-
-            let textColor =
-              r.status === "occupied" || r.status === "reserved"
-                ? "#fff"
-                : "#000";
-
-            return (
-              <div
-                key={r.number}
-                style={{
-                  height: 60,
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 12,
-                  color: textColor,
-                  background: bg,
-                  backdropFilter: "blur(10px)",
-                  WebkitBackdropFilter: "blur(10px)",
-                  border: "1px solid rgba(255,255,255,0.2)",
-                  boxShadow:
-                    "inset 2px 2px 6px rgba(255,255,255,0.25), inset -2px -2px 6px rgba(0,0,0,0.25), 0 4px 10px rgba(0,0,0,0.3)",
-                  cursor: "pointer",
-                  transition: "transform 0.15s ease, box-shadow 0.15s ease"
-                }}
-                title={
-                  r.status === "reserved"
-                    ? `Reserved for: ${r.reservedFor?.name || "Guest"}`
-                    : r.status === "occupied"
-                    ? `Occupied by: ${r.guest?.name || "Guest"}\nContact: ${
-                        r.guest?.contact || "-"
-                      }\nCheck-in: ${r.guest?.checkInDate || "-"} ${
-                        r.guest?.checkInTime || ""
-                      }`
-                    : "Free"
-                }
-                onClick={() => handleRoomClick(r)}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.boxShadow =
-                    "0 6px 14px rgba(0,0,0,0.4), inset 2px 2px 6px rgba(255,255,255,0.25)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.boxShadow =
-                    "inset 2px 2px 6px rgba(255,255,255,0.25), inset -2px -2px 6px rgba(0,0,0,0.25), 0 4px 10px rgba(0,0,0,0.3)")
-                }
-              >
-                {r.number}
-              </div>
-            );
-          })}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+          {roomsByFloor[floorNum].map(r => (
+            <div
+              key={r.number}
+              style={roomBoxStyle(r)}
+              title={
+                r.status === 'reserved'
+                  ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+                  : r.status === 'occupied'
+                  ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+                  : 'Free'
+              }
+              onClick={() => handleRoomClick(r)}
+            >
+              {r.number}
+            </div>
+          ))}
         </div>
       </div>
     ))}
