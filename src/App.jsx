@@ -2955,6 +2955,30 @@ function Reservations({ state, setState }) {
     );
   });
 
+  
+  const FloorsContainer = ({ children }) => (
+  <div style={{ display: 'grid', gap: 12 }}>{children}</div>
+);
+
+const FloorGroup = ({ children }) => (
+  <div style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, padding: 10 }}>
+    {children}
+  </div>
+);
+
+const FloorTitle = ({ children }) => (
+  <div style={{ fontWeight: 600, marginBottom: 8 }}>{children}</div>
+);
+
+const RoomsWrap = ({ children }) => (
+  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>{children}</div>
+);
+
+const RoomItem = ({ children }) => (
+  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{children}</label>
+);
+
+
   return (
     <div>
       <div>
@@ -2998,39 +3022,31 @@ function Reservations({ state, setState }) {
         />
 
         {/* Room checkboxes by floor */}
-        {Object.entries(availableRooms).map(([floor, rooms]) => (
-          <div key={floor} style={{ marginBottom: 10 }}>
-            <div style={{ fontWeight: 600 }}>Floor {floor}</div>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {rooms.map((num) => (
-                <label
-                  key={num}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    value={num}
-                    checked={form.rooms.includes(num)}
-                    onChange={(e) => {
-                      let updated = [...form.rooms];
-                      if (e.target.checked) {
-                        updated.push(num);
-                      } else {
-                        updated = updated.filter((r) => r !== num);
-                      }
-                      setForm({ ...form, rooms: updated });
-                    }}
-                  />
-                  Room {num}
-                </label>
-              ))}
-            </div>
-          </div>
+        <FloorsContainer>
+  {Object.entries(availableRooms).map(([floor, rooms]) => (
+    <FloorGroup key={floor}>
+      <FloorTitle>Floor {floor}</FloorTitle>
+      <RoomsWrap>
+        {rooms.map((num) => (
+          <RoomItem key={num}>
+            <input
+              type="checkbox"
+              value={num}
+              checked={form.rooms.includes(num)}
+              onChange={(e) => {
+                let updated = [...form.rooms];
+                if (e.target.checked) updated.push(num);
+                else updated = updated.filter((r) => r !== num);
+                setForm({ ...form, rooms: updated });
+              }}
+            />
+            Room {num}
+          </RoomItem>
         ))}
+      </RoomsWrap>
+    </FloorGroup>
+  ))}
+</FloorsContainer>
 
         <button className="btn primary" type="submit">
           Add
