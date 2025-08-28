@@ -4642,8 +4642,6 @@ export default function App() {
         <div className="main">
           <Routes>
             <Route path="/" element={<Dashboard state={state} />} />
-            <Route path="/floors" element={<FloorsContainer state={state} setState={setState} />} />
-            <Route path="/floors/:floor" element={<FloorsContainer state={state} setState={setState} />} />
             <Route path="/checkin" element={<CheckIn state={state} setState={setState} locationState={{}} />} />
             <Route path="/checkout" element={<CheckOut state={state} setState={setState} />} />
             <Route path="/reservations" element={<Reservations state={state} setState={setState} />} />
