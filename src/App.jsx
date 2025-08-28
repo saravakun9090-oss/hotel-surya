@@ -128,7 +128,7 @@ const Sidebar = () => {
 
 
 const StatCard = ({ title, value }) => (
-  <div className="stat">
+  <div className="stat" style={{backgroundColor: '#4f6958ff'}}>
     <div className="label">{title}</div>
     <div className="value">{value}</div>
   </div>
@@ -247,8 +247,8 @@ const checkInReservation = (res) => {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: 16,
-            backgroundColor: '#4f6958ff'
+            gap: 16
+            
           }}
         >
           <StatCard title="Total Rooms" value={total} style={{backgroundColor: '#4f6958ff' }}/>
