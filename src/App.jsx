@@ -82,7 +82,7 @@ const Sidebar = () => {
 
   return (
     <div className="w-64 h-screen flex flex-col p-4 
-                    bg-white/10 backdrop-blur-md shadow-xl border-r border-white/20">
+                    bg-white/10 backdrop-blur-xl shadow-xl border-r border-white/20">
       {/* Logo */}
       <div className="mb-6">
         <h1 className="text-lg font-bold text-white">🏨 HOTEL SURYA</h1>
@@ -105,7 +105,11 @@ const Sidebar = () => {
               {isActive && (
                 <motion.div
                   layoutId="activeBackground"
-                  className="absolute inset-0 rounded-lg bg-white/20 backdrop-blur-sm"
+                  className="absolute inset-0 rounded-lg 
+                             bg-white/10 backdrop-blur-md 
+                             border border-white/30 shadow-lg
+                             before:absolute before:inset-0 before:rounded-lg 
+                             before:bg-gradient-to-tr before:from-white/30 before:to-transparent"
                   transition={{ type: "spring", stiffness: 500, damping: 30 }}
                 />
               )}
