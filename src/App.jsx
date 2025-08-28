@@ -102,15 +102,17 @@ const Sidebar = () => {
             <Link
               key={item.to}
               to={item.to}
-              className="relative px-4 py-2 rounded-full font-medium"
+              className="relative px-4 py-2 rounded-lg font-medium transition-colors"
             >
               {isActive && (
                 <motion.div
                   layoutId="activeBackground"
-                  className="absolute inset-0 rounded-full 
+                  className="absolute inset-0 rounded-lg 
                              bg-white/10 backdrop-blur-md 
                              border border-white/20 
-                             shadow-[inset_2px_2px_6px_rgba(255,255,255,0.3),inset_-2px_-2px_6px_rgba(0,0,0,0.3)]"
+                             shadow-[inset_2px_2px_6px_rgba(255,255,255,0.25),inset_-2px_-2px_6px_rgba(0,0,0,0.25),0_4px_12px_rgba(0,0,0,0.4)] 
+                             before:absolute before:inset-0 before:rounded-lg 
+                             before:bg-gradient-to-tr before:from-white/20 before:to-transparent"
                   transition={{ type: "spring", stiffness: 500, damping: 30 }}
                 />
               )}
