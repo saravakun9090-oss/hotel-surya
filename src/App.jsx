@@ -247,10 +247,10 @@ const checkInReservation = (res) => {
             gap: 16
           }}
         >
-          <StatCard title="Total Rooms" value={total} />
-          <StatCard title="Available" value={free} />
-          <StatCard title="Reserved" value={reserved} />
-          <StatCard title="Occupied" value={occupied} />
+          <StatCard title="Total Rooms" value={total} style={{backgroundColor: '#4f6958ff' }}/>
+          <StatCard title="Available" value={free} style={{backgroundColor: '#4f6958ff' }}/>
+          <StatCard title="Reserved" value={reserved} style={{backgroundColor: '#4f6958ff' }} />
+          <StatCard title="Occupied" value={occupied} style={{backgroundColor: '#4f6958ff' }}/>
         </div>
       </div>
 
@@ -329,9 +329,9 @@ const checkInReservation = (res) => {
               color: "#000", // text always black for readability
               background:
                 r.status === "occupied"
-                  ? "rgba(0, 200, 0, 0.85)" // green
+                  ? "#d0edd4" // green
                   : r.status === "reserved"
-                  ? "rgba(255, 165, 0, 0.85)" // orange
+                  ? "#f8e6ba" // orange
                   : "rgba(255,255,255,0.95)", // white for free
               boxShadow: "0 1px 6px rgba(0,0,0,0.08)",
               border: "1px solid rgba(0,0,0,0.1)"
