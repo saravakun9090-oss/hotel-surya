@@ -1656,12 +1656,11 @@ if (reservationMatches.length) {
   });
 
   const roomBoxStyle = (r) => {
-  const bg =
-    r.status === "reserved" ? "rgba(255, 213, 128, 0.15)" :
-    r.status === "occupied" ? "rgba(139, 224, 164, 0.15)" :
-    "rgba(255, 255, 255, 0.12)";
-
-  const isDisabled = r.status === "occupied";
+    const bg =
+      r.status === "reserved" ? "rgba(255, 213, 128, 0.6)" :
+      r.status === "occupied" ? "rgba(139, 224, 164, 0.6)" :
+      "rgba(255, 255, 255, 0.6)";
+    const isDisabled = r.status === "occupied";
   const isSelected = Array.isArray(form.room) ? form.room.includes(r.number) : selectedRoom === r.number;
 
   return {
@@ -1675,18 +1674,17 @@ if (reservationMatches.length) {
     fontSize: 14,
     color: '#000000ff',
     background: bg,
-    backdropFilter: 'blur(12px) saturate(180%)',
-    WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-    border: `1px solid ${isSelected ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.25)'}`,
+    backdropFilter: 'blur(14px) saturate(220%)', // more saturation for vibrance
+    WebkitBackdropFilter: 'blur(14px) saturate(220%)',
+    border: `1px solid ${isSelected ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)'}`,
     boxShadow: isSelected 
-      ? 'inset 1px 1px 2px rgba(255,255,255,0.4), inset -1px -1px 2px rgba(0,0,0,0.2), 0 0 8px rgba(46,76,65,0.3)' 
-      : 'inset 1px 1px 2px rgba(255,255,255,0.35), inset -1px -1px 2px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.25)',
+      ? 'inset 1px 1px 2px rgba(255,255,255,0.6), inset -1px -1px 2px rgba(0,0,0,0.25), 0 0 12px rgba(46,76,65,0.4)' 
+      : 'inset 1px 1px 2px rgba(255,255,255,0.5), inset -1px -1px 2px rgba(0,0,0,0.25), 0 4px 14px rgba(0,0,0,0.3)',
     transition: 'all 150ms ease',
     transform: isSelected ? 'translateY(-2px)' : 'none',
-    opacity: isDisabled ? 0.7 : 1,
+    opacity: isDisabled ? 0.75 : 1,
+    };
   };
-};
-
 
   useEffect(() => () => { if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current); }, []);
 
