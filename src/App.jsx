@@ -81,10 +81,8 @@ const Sidebar = () => {
   ];
 
   return (
-    <div
-      className="w-64 h-screen flex flex-col p-4 text-white shadow-xl border-r border-white/10"
-      style={{ backgroundColor: "#1a211dff" }} // Sidebar base color
-    >
+    <div className="w-64 h-screen flex flex-col p-4 
+                    bg-[var(--deep)] text-white shadow-xl border-r border-[var(--cream)]/20">
       {/* Logo */}
       <div className="mb-6">
         <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
@@ -108,10 +106,10 @@ const Sidebar = () => {
                 <motion.div
                   layoutId="activeBackground"
                   className="absolute inset-0 rounded-lg 
-                             bg-white/20 backdrop-blur-md
-                             border border-white/30 shadow-md
+                             bg-[var(--cream)]/40 backdrop-blur-sm 
+                             border border-[var(--cream)]/60 shadow-md
                              before:absolute before:inset-0 before:rounded-lg 
-                             before:bg-gradient-to-tr before:from-white/40 before:to-transparent"
+                             before:bg-gradient-to-tr before:from-white/30 before:to-transparent"
                   transition={{ type: "spring", stiffness: 500, damping: 30 }}
                 />
               )}
