@@ -318,7 +318,7 @@ const checkInReservation = (res) => {
         {layoutFloors[floorNum].map((r) => (
           <div
             key={r.number}
-            className={`room ${r.status}`} // ✅ keep your status class
+            className={`room ${r.status}`} // keep your classes for extra CSS if needed
             style={{
               height: 48,
               fontWeight: 700,
@@ -326,16 +326,15 @@ const checkInReservation = (res) => {
               alignItems: "center",
               justifyContent: "center",
               borderRadius: 10,
+              color: "#000", // text always black for readability
               background:
-                r.status === "available"
-                  ? "rgba(0, 200, 100, 0.25)"
+                r.status === "occupied"
+                  ? "rgba(0, 200, 0, 0.85)" // green
                   : r.status === "reserved"
-                  ? "rgba(255, 200, 0, 0.25)"
-                  : r.status === "occupied"
-                  ? "rgba(200, 0, 0, 0.25)"
-                  : "rgba(255,255,255,0.4)",
-              backdropFilter: "blur(6px)",
-              boxShadow: "0 1px 6px rgba(0,0,0,0.06)"
+                  ? "rgba(255, 165, 0, 0.85)" // orange
+                  : "rgba(255,255,255,0.95)", // white for free
+              boxShadow: "0 1px 6px rgba(0,0,0,0.08)",
+              border: "1px solid rgba(0,0,0,0.1)"
             }}
           >
             {floorNum}
