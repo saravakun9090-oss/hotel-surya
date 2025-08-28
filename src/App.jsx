@@ -127,45 +127,12 @@ const Sidebar = () => {
 
 
 
-// --- StatCard ---
-const StatCard = ({ title, value, color }) => (
-  <div
-    className="stat"
-    style={{
-      padding: "16px 20px",
-      borderRadius: 12,
-      background: "rgba(255, 255, 255, 0.75)",
-      backdropFilter: "blur(8px)",
-      boxShadow: "0 4px 10px rgba(0,0,0,0.08)",
-      border: "1px solid rgba(255,255,255,0.3)",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "flex-start",
-    }}
-  >
-    <div
-      style={{
-        fontSize: 13,
-        fontWeight: 600,
-        color: "var(--muted)",
-        marginBottom: 6,
-      }}
-    >
-      {title}
-    </div>
-    <div
-      style={{
-        fontSize: 22,
-        fontWeight: 800,
-        color,
-        lineHeight: 1.2,
-      }}
-    >
-      {value}
-    </div>
+const StatCard = ({ title, value }) => (
+  <div className="stat"   style={{backgroundColor: 'rgb(52, 66, 57)'}}>
+    <div className="label" style={{color: '#ffffffcd'}}>{title}</div>
+    <div className="value" style={{color: '#000000cd'}}>{value}</div>
   </div>
 );
-
 
 const RoomCard = ({ room, onClick }) => (
   <div className={`room ${room.status}`} onClick={() => onClick(room)} title={`Room ${room.number} — ${room.status}`}>
@@ -274,39 +241,22 @@ const checkInReservation = (res) => {
     {/* LEFT COLUMN */}
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Overview */}
-<div className="card" style={{ padding: 20 }}>
-  <h3 style={{ margin: 0, marginBottom: 16, fontSize: 18, fontWeight: 700 }}>
-    Overview
-  </h3>
-  <div
-    style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(2, 1fr)",
-      gap: 16,
-    }}
-  >
-    <StatCard
-      title="Total Rooms"
-      value={total}
-      color="#2d6a4f"
-    />
-    <StatCard
-      title="Available"
-      value={free}
-      color="#40916c"
-    />
-    <StatCard
-      title="Reserved"
-      value={reserved}
-      color="#ffb703"
-    />
-    <StatCard
-      title="Occupied"
-      value={occupied}
-      color="#d62828"
-    />
-  </div>
-</div>
+      <div className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: 0, marginBottom: 16 }}>Overview</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
+            gap: 16
+            
+          }}
+        >
+          <StatCard title="Total Rooms" value={total} />
+          <StatCard title="Available" value={free} />
+          <StatCard title="Reserved" value={reserved} />
+          <StatCard title="Occupied" value={occupied} />
+        </div>
+      </div>
 
       {/* Recent Check-ins */}
 <div
