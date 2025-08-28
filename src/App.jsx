@@ -247,8 +247,8 @@ const checkInReservation = (res) => {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(2, 1fr)",
-            gap: 16
-            style={{backgroundColor: '#4f6958ff' }}
+            gap: 16,
+            backgroundColor: '#4f6958ff'
           }}
         >
           <StatCard title="Total Rooms" value={total} style={{backgroundColor: '#4f6958ff' }}/>
