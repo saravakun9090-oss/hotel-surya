@@ -294,51 +294,59 @@ const checkInReservation = (res) => {
     {/* RIGHT COLUMN */}
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Room Layout */}
-      <div className="card" style={{ padding: 16 }}>
-        <h3 style={{ margin: 0, marginBottom: 16 }}>Room Layout (Today)</h3>
-        {Object.keys(layoutFloors).map((floorNum) => (
-          <div key={floorNum} style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 14,
-                marginBottom: 6,
-                color: "var(--muted)"
-              }}
-            >
-              Floor {floorNum}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4,1fr)",
-                gap: 8
-              }}
-            >
-              {layoutFloors[floorNum].map((r) => (
-                <div
-                  key={r.number}
-                  className={`room ${r.status}`}
-                  style={{
-                    height: 48,
-                    fontWeight: 700,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: 10,
-                    background: "rgba(255,255,255,0.55)",
-                    backdropFilter: "blur(6px)",
-                    boxShadow: "0 1px 6px rgba(0,0,0,0.06)"
-                  }}
-                >
-                  {floorNum}
-                  {String(r.number).slice(-2)}
-                </div>
-              ))}
-            </div>
+<div className="card" style={{ padding: 16 }}>
+  <h3 style={{ margin: 0, marginBottom: 16 }}>Room Layout (Today)</h3>
+  {Object.keys(layoutFloors).map((floorNum) => (
+    <div key={floorNum} style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          fontWeight: 700,
+          fontSize: 14,
+          marginBottom: 6,
+          color: "var(--muted)"
+        }}
+      >
+        Floor {floorNum}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4,1fr)",
+          gap: 8
+        }}
+      >
+        {layoutFloors[floorNum].map((r) => (
+          <div
+            key={r.number}
+            className={`room ${r.status}`} // ✅ keep your status class
+            style={{
+              height: 48,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 10,
+              background:
+                r.status === "available"
+                  ? "rgba(0, 200, 100, 0.25)"
+                  : r.status === "reserved"
+                  ? "rgba(255, 200, 0, 0.25)"
+                  : r.status === "occupied"
+                  ? "rgba(200, 0, 0, 0.25)"
+                  : "rgba(255,255,255,0.4)",
+              backdropFilter: "blur(6px)",
+              boxShadow: "0 1px 6px rgba(0,0,0,0.06)"
+            }}
+          >
+            {floorNum}
+            {String(r.number).slice(-2)}
           </div>
         ))}
       </div>
+    </div>
+  ))}
+</div>
+
 
       {/* Today's Reservations */}
       <div className="card" style={{ padding: 16 }}>
