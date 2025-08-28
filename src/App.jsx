@@ -306,7 +306,7 @@ const checkInReservation = (res) => {
           fontWeight: 700,
           fontSize: 14,
           marginBottom: 6,
-          color: "var(--muted)"
+          color: "var(--muted)",
         }}
       >
         Floor {floorNum}
@@ -315,39 +315,55 @@ const checkInReservation = (res) => {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4,1fr)",
-          gap: 8
+          gap: 8,
         }}
       >
-        {layoutFloors[floorNum].map((r) => (
-          <div
-            key={r.number}
-            className={`room ${r.status}`} // keep your classes for extra CSS if needed
-            style={{
-              height: 48,
-              fontWeight: 700,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 10,
-              color: "#000", // text always black for readability
-              background:
-                r.status === "occupied"
-                  ? "#d0edd4" // green
-                  : r.status === "reserved"
-                  ? "#f8e6ba" // orange
-                  : "rgba(255,255,255,0.95)", // white for free
-              boxShadow: "0 1px 6px rgba(0,0,0,0.08)",
-              border: "1px solid rgba(0,0,0,0.1)"
-            }}
-          >
-            {floorNum}
-            {String(r.number).slice(-2)}
-          </div>
-        ))}
+        {layoutFloors[floorNum].map((r) => {
+          // pick a tinted glass background depending on status
+          const bg =
+            r.status === "occupied"
+              ? "rgba(113, 191, 129, 0.25)" // soft green tint
+              : r.status === "reserved"
+              ? "rgba(240, 185, 80, 0.25)" // soft amber tint
+              : "rgba(255, 255, 255, 0.15)"; // neutral glass for free
+
+          const border =
+            r.status === "occupied"
+              ? "1px solid rgba(113,191,129,0.4)"
+              : r.status === "reserved"
+              ? "1px solid rgba(240,185,80,0.4)"
+              : "1px solid rgba(255,255,255,0.25)";
+
+          return (
+            <div
+              key={r.number}
+              className={`room ${r.status}`}
+              style={{
+                height: 60,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 12,
+                color: "#fff", // white text for glass style
+                background: bg,
+                backdropFilter: "blur(12px)", // frosted glass
+                WebkitBackdropFilter: "blur(12px)", // Safari support
+                border,
+                boxShadow:
+                  "inset 1px 1px 4px rgba(255,255,255,0.3), inset -1px -1px 4px rgba(0,0,0,0.3), 0 4px 10px rgba(0,0,0,0.25)",
+              }}
+            >
+              {floorNum}
+              {String(r.number).slice(-2)}
+            </div>
+          );
+        })}
       </div>
     </div>
   ))}
 </div>
+
 
 
       {/* Today's Reservations */}
