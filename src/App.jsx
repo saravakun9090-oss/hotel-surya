@@ -216,150 +216,178 @@ const checkInReservation = (res) => {
 
   return (
     <div>
-      {/* HEADER */}
-      <div className="header-row">
-        <div>
-          <div className="title">Dashboard</div>
-          <div style={{ color: 'var(--muted)', marginTop: 4 }}>
-            Overview of rooms, check-ins, and reservations
-          </div>
-        </div>
-        <div className="controls">
-          <div className="floor-pills">
-            {Object.keys(floors).map(f => (
-              <Link key={f} to={`/floors/${f}`} className="pill">
-                Floor {f}
-              </Link>
-            ))}
-          </div>
+  {/* HEADER */}
+  <div className="header-row">
+    <div>
+      <div className="title">Dashboard</div>
+      <div style={{ color: 'var(--muted)', marginTop: 4 }}>
+        Overview of rooms, check-ins, and reservations
+      </div>
+    </div>
+  </div>
+
+  {/* MAIN CONTENT */}
+  <div
+    style={{
+      display: "flex",
+      gap: 20,
+      marginTop: 20,
+      alignItems: "stretch"
+    }}
+  >
+    {/* LEFT COLUMN */}
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Overview */}
+      <div className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: 0, marginBottom: 16 }}>Overview</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
+            gap: 16
+          }}
+        >
+          <StatCard title="Total Rooms" value={total} />
+          <StatCard title="Available" value={free} />
+          <StatCard title="Reserved" value={reserved} />
+          <StatCard title="Occupied" value={occupied} />
         </div>
       </div>
 
-      {/* MAIN: Two columns */}
-      <div style={{ display: 'flex', gap: 20, marginTop: 20, alignItems: 'stretch' }}>
-        
-        {/* LEFT COLUMN */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* Overview (top) */}
-          <div>
-            <h3 style={{ margin: 0, marginBottom: 12 }}>Overview</h3>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 12
-            }}>
-              <StatCard title="Total Rooms" value={total} />
-              <StatCard title="Available" value={free} />
-              <StatCard title="Reserved" value={reserved} />
-              <StatCard title="Occupied" value={occupied} />
+      {/* Recent Check-ins */}
+      <div className="card" style={{ flex: 1, minHeight: 0, padding: 16 }}>
+        <h3 style={{ margin: 0, marginBottom: 12 }}>Recent Check-ins</h3>
+        <div className="list" style={{ marginTop: 0 }}>
+          {recent.length === 0 && (
+            <div style={{ color: "var(--muted)" }}>No current guests</div>
+          )}
+          {recent.slice(0, 6).map((r, idx) => (
+            <div
+              key={idx}
+              className="card"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.65)",
+                backdropFilter: "blur(6px)",
+                boxShadow: "0 2px 10px rgba(0,0,0,0.08)"
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700 }}>{r.guest.name}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Room {r.room}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                {new Date(r.guest.checkIn).toLocaleDateString()}
+              </div>
             </div>
-          </div>
+          ))}
+        </div>
+      </div>
+    </div>
 
-          {/* Recent Check-ins (bottom) */}
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <h3 style={{ margin: 0, marginBottom: 8 }}>Recent Check-ins</h3>
-            <div className="list" style={{ marginTop: 0 }}>
-              {recent.length === 0 && (
-                <div style={{ color: 'var(--muted)' }}>No current guests</div>
-              )}
-              {recent.slice(0, 6).map((r, idx) => (
+    {/* RIGHT COLUMN */}
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Room Layout */}
+      <div className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: 0, marginBottom: 16 }}>Room Layout (Today)</h3>
+        {Object.keys(layoutFloors).map((floorNum) => (
+          <div key={floorNum} style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                fontWeight: 700,
+                fontSize: 14,
+                marginBottom: 6,
+                color: "var(--muted)"
+              }}
+            >
+              Floor {floorNum}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4,1fr)",
+                gap: 8
+              }}
+            >
+              {layoutFloors[floorNum].map((r) => (
                 <div
-                  key={idx}
-                  className="card"
+                  key={r.number}
+                  className={`room ${r.status}`}
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
+                    height: 48,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 10,
+                    background: "rgba(255,255,255,0.55)",
+                    backdropFilter: "blur(6px)",
+                    boxShadow: "0 1px 6px rgba(0,0,0,0.06)"
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{r.guest.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {r.room}</div>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {new Date(r.guest.checkIn).toLocaleDateString()}
-                  </div>
+                  {floorNum}
+                  {String(r.number).slice(-2)}
                 </div>
               ))}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* Room Layout (top) */}
-          <div>
-            <h3 style={{ margin: 0, marginBottom: 12 }}>Room Layout (Today)</h3>
-            <div className="card" style={{ padding: 14 }}>
-              {Object.keys(layoutFloors).map(floorNum => (
-                <div key={floorNum} style={{ marginBottom: 12 }}>
-                  <div style={{
-                    fontWeight: 700,
-                    fontSize: 14,
-                    marginBottom: 6,
-                    color: 'var(--muted)'
-                  }}>
-                    Floor {floorNum}
-                  </div>
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(4,1fr)',
-                    gap: 8
-                  }}>
-                    {layoutFloors[floorNum].map(r => (
-                      <div
-                        key={r.number}
-                        className={`room ${r.status}`}
-                        style={{
-                          height: 48,
-                          fontWeight: 700,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: 8
-                        }}
-                      >
-                        {floorNum}{String(r.number).slice(-2)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Today's Reservations (bottom) */}
-          <div className="list">
-        {(todaysReservations.length === 0) && (
-  <div style={{ color: 'var(--muted)' }}>No reservations for today</div>
-)}
-{todaysReservations.map((r, i) => (
-          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>
-                {r.name} - <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{r.place}</span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Room {r.room} — {r.date}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn primary" onClick={() => checkInReservation(r)}>Check-In</button>
-              
             </div>
           </div>
         ))}
       </div>
-        </div>
-      </div>
 
-      {/* Footer */}
-      <div className="footer" style={{ marginTop: 20 }}>
-        Tip: Click on any room in the Floors page to see actions: check-in, check-out, reserve.
+      {/* Today's Reservations */}
+      <div className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: 0, marginBottom: 12 }}>Today's Reservations</h3>
+        {(todaysReservations.length === 0) && (
+          <div style={{ color: "var(--muted)" }}>No reservations for today</div>
+        )}
+        {todaysReservations.map((r, i) => (
+          <div
+            key={i}
+            className="card"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "10px 12px",
+              borderRadius: 10,
+              marginBottom: 8,
+              background: "rgba(255,255,255,0.65)",
+              backdropFilter: "blur(6px)",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.08)"
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                {r.name} -{" "}
+                <span style={{ color: "var(--muted)", fontWeight: 700 }}>
+                  {r.place}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                Room {r.room} — {r.date}
+              </div>
+            </div>
+            <div>
+              <button
+                className="btn primary"
+                onClick={() => checkInReservation(r)}
+              >
+                Check-In
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
+  </div>
+</div>
+
   );
 }
 
