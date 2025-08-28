@@ -298,60 +298,71 @@ const checkInReservation = (res) => {
     {/* RIGHT COLUMN */}
     <div style={{ flex: 1.2, display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Room Layout */}
-      <div className="card" style={{ padding: 16, flexShrink: 0 }}>
-        <h3 style={{ margin: 0, marginBottom: 16 }}>Room Layout (Today)</h3>
-        {Object.keys(layoutFloors).map((floorNum) => (
-          <div key={floorNum} style={{ marginBottom: 12 }}>
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 14,
-                marginBottom: 6,
-                color: "var(--muted)"
-              }}
-            >
-              Floor {floorNum}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4,1fr)",
-                gap: 8
-              }}
-            >
-              {layoutFloors[floorNum].map((r) => {
-                let bg =
-                  r.status === "occupied"
-                    ? "rgba(0, 180, 90, 0.85)" // green
-                    : r.status === "reserved"
-                    ? "rgba(255, 165, 0, 0.85)" // orange
-                    : "rgba(255, 255, 255, 0.95)"; // free: white
-                return (
-                  <div
-                    key={r.number}
-                    className={`room ${r.status}`}
-                    style={{
-                      height: 50,
-                      fontWeight: 700,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 10,
-                      color: "#000",
-                      background: bg,
-                      border: "1px solid rgba(0,0,0,0.1)",
-                      boxShadow: "0 1px 6px rgba(0,0,0,0.08)"
-                    }}
-                  >
-                    {floorNum}
-                    {String(r.number).slice(-2)}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+      <div className="card" style={{ padding: 16 }}>
+  <h3 style={{ margin: 0, marginBottom: 16 }}>Room Layout (Today)</h3>
+  {Object.keys(layoutFloors).map((floorNum) => (
+    <div key={floorNum} style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          fontWeight: 700,
+          fontSize: 14,
+          marginBottom: 6,
+          color: "var(--muted)"
+        }}
+      >
+        Floor {floorNum}
       </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4,1fr)",
+          gap: 8
+        }}
+      >
+        {layoutFloors[floorNum].map((r) => {
+          // define glassy background color per status
+          let bg =
+            r.status === "occupied"
+              ? "rgba(0, 180, 90, 0.25)" // green tint
+              : r.status === "reserved"
+              ? "rgba(240, 180, 0, 0.25)" // amber tint
+              : "rgba(255, 255, 255, 0.15)"; // free: light frosted glass
+
+          let textColor =
+            r.status === "occupied" || r.status === "reserved"
+              ? "#fff"
+              : "#000";
+
+          return (
+            <div
+              key={r.number}
+              className={`room ${r.status}`}
+              style={{
+                height: 60,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 12,
+                color: textColor,
+                background: bg,
+                backdropFilter: "blur(8px)",
+                WebkitBackdropFilter: "blur(8px)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                boxShadow:
+                  "inset 2px 2px 6px rgba(255,255,255,0.25), inset -2px -2px 6px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.25)"
+              }}
+            >
+              {floorNum}
+              {String(r.number).slice(-2)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ))}
+</div>
+
 
       {/* Today's Reservations */}
       <div className="card" style={{ padding: 16, flex: 1, display: "flex", flexDirection: "column" }}>
