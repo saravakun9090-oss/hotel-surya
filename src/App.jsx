@@ -66,8 +66,10 @@ function loadState() {
 function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
 
+
 const Sidebar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const navItems = [
     { to: "/", label: "Dashboard" },
@@ -99,15 +101,16 @@ const Sidebar = () => {
           const isActive = location.pathname === item.to;
 
           return (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="relative px-4 py-2 rounded-lg font-medium transition-colors"
-            >
+            <div key={item.to} className="relative">
               {isActive && (
                 <motion.div
                   layoutId="activeBackground"
-                  className="absolute inset-0 rounded-lg 
+                  drag
+                  dragConstraints={{ top: -50, bottom: 50, left: -50, right: 50 }}
+                  dragElastic={0.2}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => navigate(item.to)}
+                  className="absolute inset-0 z-0 rounded-lg cursor-grab active:cursor-grabbing
                              bg-white/10 backdrop-blur-md 
                              border border-white/20 
                              shadow-[inset_2px_2px_6px_rgba(255,255,255,0.25),inset_-2px_-2px_6px_rgba(0,0,0,0.25),0_4px_12px_rgba(0,0,0,0.4)] 
@@ -116,15 +119,19 @@ const Sidebar = () => {
                   transition={{ type: "spring", stiffness: 500, damping: 30 }}
                 />
               )}
-              <span className="relative z-10">{item.label}</span>
-            </Link>
+              <Link
+                to={item.to}
+                className="relative px-4 py-2 rounded-lg font-medium z-10"
+              >
+                {item.label}
+              </Link>
+            </div>
           );
         })}
       </nav>
     </div>
   );
 };
-
 
 
 const StatCard = ({ title, value }) => (
