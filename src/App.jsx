@@ -81,8 +81,10 @@ const Sidebar = () => {
   ];
 
   return (
-    <div className="w-64 h-screen flex flex-col p-4 
-                    bg-[var(--deep)] text-white shadow-xl border-r border-[var(--cream)]/20">
+    <div
+      className="w-64 h-screen flex flex-col p-4 text-white border-r border-white/10"
+      style={{ backgroundColor: "#344239" }} // Sidebar base color
+    >
       {/* Logo */}
       <div className="mb-6">
         <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
@@ -100,16 +102,15 @@ const Sidebar = () => {
             <Link
               key={item.to}
               to={item.to}
-              className="relative px-4 py-2 rounded-lg font-medium"
+              className="relative px-4 py-2 rounded-full font-medium"
             >
               {isActive && (
                 <motion.div
                   layoutId="activeBackground"
-                  className="absolute inset-0 rounded-lg 
-                             bg-[var(--cream)]/40 backdrop-blur-sm 
-                             border border-[var(--cream)]/60 shadow-md
-                             before:absolute before:inset-0 before:rounded-lg 
-                             before:bg-gradient-to-tr before:from-white/30 before:to-transparent"
+                  className="absolute inset-0 rounded-full 
+                             bg-white/10 backdrop-blur-md 
+                             border border-white/20 
+                             shadow-[inset_2px_2px_6px_rgba(255,255,255,0.3),inset_-2px_-2px_6px_rgba(0,0,0,0.3)]"
                   transition={{ type: "spring", stiffness: 500, damping: 30 }}
                 />
               )}
