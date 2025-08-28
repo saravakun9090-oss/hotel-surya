@@ -1676,7 +1676,7 @@ if (reservationMatches.length) {
     justifyContent: 'center',
     fontWeight: 700,
     fontSize: 14,
-    color: '#fff',
+    color: '#000000ff',
     background: selectedFree ? "rgba(0, 132, 255, 0.3)" : baseBg, // frosted blue if selected & free
     backdropFilter: 'blur(18px) saturate(200%)',
     WebkitBackdropFilter: 'blur(18px) saturate(200%)',
