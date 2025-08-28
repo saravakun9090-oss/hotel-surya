@@ -63,38 +63,54 @@ function loadState() {
 }
 function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
-const Sidebar = () => (
-  <div className="w-64 h-screen bg-gray-900 text-gray-200 flex flex-col p-4">
-    {/* Logo */}
-    <div className="mb-6">
-      <h1 className="text-xl font-bold text-white">🏨 HOTEL SURYA</h1>
-      <p className="text-sm text-gray-400">Manage check-ins, checkouts & reservations</p>
-    </div>
 
-    {/* Nav */}
-    <nav className="flex flex-col space-y-2">
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/">Dashboard</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/checkin">Check-in</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/checkout">Check-out</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/reservations">Reservations</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/floors">Floors</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/storage">Storage</Link>
-      <Link className="px-3 py-2 rounded-md bg-indigo-600 text-white" to="/accounts">Accounts</Link>
-      <Link className="px-3 py-2 rounded-md hover:bg-gray-700" to="/analysis">Analysis</Link>
-    </nav>
+const Sidebar = () => {
+  const location = useLocation();
 
-    <div className="flex-1" />
+  const navItems = [
+    { to: "/", label: "Dashboard" },
+    { to: "/checkin", label: "Check-in" },
+    { to: "/checkout", label: "Check-out" },
+    { to: "/reservations", label: "Reservations" },
+    { to: "/floors", label: "Floors" },
+    { to: "/storage", label: "Storage" },
+    { to: "/accounts", label: "Accounts" },
+    { to: "/analysis", label: "Analysis" },
+  ];
 
-    {/* Theme selector */}
-    <div className="mt-6">
-      <p className="text-xs uppercase tracking-wider text-gray-400">Theme</p>
-      <div className="flex gap-3 mt-2">
-        <button className="w-6 h-6 rounded-full bg-yellow-400 border-2 border-white" />
-        <button className="w-6 h-6 rounded-full bg-indigo-600 border-2 border-white" />
+  return (
+    <div className="w-64 h-screen flex flex-col bg-[var(--deep)] text-white p-4">
+      {/* Logo */}
+      <div className="mb-6">
+        <h1 className="text-lg font-bold">🏨 HOTEL SURYA</h1>
+        <p className="text-xs opacity-80">
+          Manage check-ins, checkouts & reservations
+        </p>
       </div>
+
+      {/* Navigation */}
+      <nav className="flex flex-col space-y-2">
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.to;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={`px-3 py-2 rounded-md transition ${
+                isActive
+                  ? "bg-[var(--cream)] text-[var(--deep)] font-semibold"
+                  : "hover:bg-[var(--cream)] hover:text-[var(--deep)]"
+              }`}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
     </div>
-  </div>
-);
+  );
+};
+
 
 
 const StatCard = ({ title, value }) => (
