@@ -83,7 +83,7 @@ const Sidebar = () => {
   return (
     <div
       className="w-64 h-screen flex flex-col p-4 text-white shadow-xl border-r border-white/10"
-      style={{ backgroundColor: "#344239" }} // Sidebar base color
+      style={{ backgroundColor: "#1a211dff" }} // Sidebar base color
     >
       {/* Logo */}
       <div className="mb-6">
