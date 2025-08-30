@@ -514,18 +514,17 @@ app.post('/api/reservation', async (req, res) => {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     const b = req.body || {};
-    // Extract and normalize rooms as array of numbers
     const rooms = Array.isArray(b.room)
       ? b.room.map(Number).filter(Boolean)
-      : String(b.room).split(',').map(x => Number(x.trim())).filter(Boolean);
+      : String(b.room || '').split(',').map(s => Number(s.trim())).filter(Boolean);
     if (!b.name || !rooms.length || !b.date) {
       return res.status(400).json({ ok: false, error: 'missing required fields' });
     }
     const doc = {
-      name: String(b.name || '').trim(),
+      name: String(b.name).trim(),
       place: String(b.place || '').trim(),
-      room: rooms, // Save array
-      date: String(b.date || '').slice(0, 10),
+      room: rooms, // store as array
+      date: String(b.date).slice(0, 10),
       createdAt: new Date().toISOString()
     };
     const r = await reservationsCol.insertOne(doc);
@@ -536,7 +535,7 @@ app.post('/api/reservation', async (req, res) => {
   }
 });
 
-// Reservation delete for one person/date (remove matching document; supports array)
+// Reservation delete by name + date (remove entire doc)
 app.delete('/api/reservation', async (req, res) => {
   try {
     await ensureDb();
@@ -547,7 +546,6 @@ app.delete('/api/reservation', async (req, res) => {
     if (!name || !date) {
       return res.status(400).json({ ok: false, error: 'missing name or date' });
     }
-    // Remove by name + date
     const result = await reservationsCol.deleteOne({ name, date });
     if (!result.deletedCount) {
       return res.status(404).json({ ok: false, error: 'not found' });

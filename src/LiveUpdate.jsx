@@ -212,18 +212,20 @@ export default function LiveUpdate() {
   }, [checkins]);
 
   // Build reservedRooms from reservations (if reservation has room number(s))
-  // Build reservedRooms from reservations (support room arrays!)
+// Build reservedRooms from reservations (support array rooms)
 const reservedRooms = useMemo(() => {
   const set = new Set();
-  for (const rv of reservations || []) {
-    if (Array.isArray(rv.room)) {
-      rv.room.forEach(roomNum => set.add(Number(roomNum)));
-    } else if (rv.room != null) {
-      set.add(Number(rv.room));
+  for (const r of reservations || []) {
+    if (Array.isArray(r.room)) {
+      r.room.forEach(roomNum => set.add(Number(roomNum)));
+    } else if (r.room != null) {
+      set.add(Number(r.room));
     }
   }
   return set;
 }, [reservations]);
+
+
 
 
   // Rent payments for “Paid till now”

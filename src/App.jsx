@@ -2818,39 +2818,45 @@ async function deleteReservationFile(date, room, name) {
 
 
 function Reservations({ state, setState }) {
-  const [form, setForm] = useState({ name: '', place: '', room: [], date: '' });
-  const [availableRooms, setAvailableRooms] = useState([]);
-  const [search, setSearch] = useState("");
+  const [form, setForm] = React.useState({ name: '', place: '', room: [], date: '' });
+  const [availableRooms, setAvailableRooms] = React.useState([]);
+  const [search, setSearch] = React.useState('');
 
-  // --- Calculate available rooms for a given date ---
-  const updateAvailableRooms = (selectedDate) => {
-    if (!selectedDate) {
+  // Calculate available rooms for a date
+  const updateAvailableRooms = (date) => {
+    if (!date) {
       setAvailableRooms([]);
       return;
     }
-    const reservedRooms = (state.reservations || []).filter(
-      r => r.date === selectedDate
-    ).flatMap(r => Array.isArray(r.room) ? r.room : [r.room]);
+    const reservedRoomSet = new Set();
+    (state.reservations || []).forEach(r => {
+      if (r.date === date) {
+        if (Array.isArray(r.room)) r.room.forEach(n => reservedRoomSet.add(n));
+        else reservedRoomSet.add(r.room);
+      }
+    });
+
     const rooms = [];
-    for (const floor of Object.values(state.floors)) {
+    for (const floor of Object.values(state.floors || {})) {
       for (const room of floor) {
-        const isOccupied = room.status === 'occupied';
-        const isReservedThatDate = reservedRooms.includes(room.number);
-        if (!isOccupied && !isReservedThatDate) {
-          rooms.push(room.number);
-        }
+        const roomNum = Number(room.number);
+        const occupied = (state.checkins || []).some(ci => {
+          const ciRooms = Array.isArray(ci.room) ? ci.room : [ci.room];
+          return ciRooms.includes(roomNum);
+        });
+        const reserved = reservedRoomSet.has(roomNum);
+        if (!occupied && !reserved) rooms.push(roomNum);
       }
     }
     setAvailableRooms(rooms);
   };
 
-  // Add new reservation (multiple rooms!)
+  // Add reservation
   const addReservation = async (e) => {
     e.preventDefault();
     if (!form.name || !form.place || !form.room.length || !form.date) {
       return alert('Please fill all fields and select at least one room');
     }
-    // Only allow one reservation per person/date
     const resObj = {
       name: form.name,
       place: form.place,
@@ -2858,16 +2864,11 @@ function Reservations({ state, setState }) {
       date: form.date,
     };
     const newState = { ...state };
-    if (!newState.reservations) newState.reservations = [];
-    // Remove previous reservations for this guest+date
-    newState.reservations = newState.reservations.filter(
-      r => !(r.name === resObj.name && r.date === resObj.date)
-    );
+    newState.reservations = (newState.reservations || []).filter(r => !(r.name === resObj.name && r.date === resObj.date));
     newState.reservations.push(resObj);
     setForm({ name: '', place: '', room: [], date: '' });
     setState(newState);
     saveState(newState);
-
     try {
       if ('BroadcastChannel' in window) {
         const bc = new BroadcastChannel('hotel_state');
@@ -2876,28 +2877,21 @@ function Reservations({ state, setState }) {
       }
     } catch {}
     await persistReservation(resObj);
-
-    // Call backend
     try {
-      const API_BASE =
-        window.MONGO_API_BASE ||
-        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-        '/api';
+      const API_BASE = window.MONGO_API_BASE || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) || '/api';
       await fetch(`${API_BASE}/reservation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(resObj)
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch { }
   };
 
-  // Delete reservation (all rooms for person/date)
+  // Delete reservation
   const deleteReservation = async (i) => {
     const res = state.reservations[i];
     if (!res) return;
-    const confirmed = window.confirm(
-      `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRooms: ${Array.isArray(res.room) ? res.room.join(', ') : res.room}\nDate: ${res.date}`
-    );
+    const confirmed = window.confirm(`Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRooms: ${ Array.isArray(res.room) ? res.room.join(', ') : res.room }\nDate: ${res.date}`);
     if (!confirmed) return;
     const newState = { ...state };
     newState.reservations.splice(i, 1);
@@ -2909,70 +2903,45 @@ function Reservations({ state, setState }) {
         bc.postMessage({ type: 'state:update', state: newState });
         bc.close();
       }
-    } catch {}
+    } catch { }
     if (Array.isArray(res.room)) {
-      for (const roomNum of res.room)
-        await deleteReservationFile(res.date, roomNum, res.name);
+      for (const roomNum of res.room) await deleteReservationFile(res.date, roomNum, res.name);
     } else {
       await deleteReservationFile(res.date, res.room, res.name);
     }
-    // delete in backend
     try {
-      const API_BASE =
-        window.MONGO_API_BASE ||
-        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-        '/api';
+      const API_BASE = window.MONGO_API_BASE || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) || '/api';
       await fetch(`${API_BASE}/reservation`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: String(res.name || '').trim(),
-          date: String(res.date || '').slice(0, 10)
-        })
-      }).catch(() => {});
-    } catch {}
+        body: JSON.stringify({ name: res.name, date: res.date })
+      }).catch(() => { });
+    } catch { }
   };
 
   const navigate = useNavigate();
   const checkInReservation = (res) => {
-    // Assumes single-room check-in for now; adapt for batch check-in if needed
-    navigate('/checkin', {
-      state: {
-        prefName: res.name,
-        prefRoom: res.room
-      }
-    });
+    navigate('/checkin', { state: { prefName: res.name, prefRoom: res.room } });
   };
 
-  // 🔍 Filter reservations based on search box
+  // Filter reservations
   const filteredReservations = (state.reservations || []).filter(r => {
-    const q = search.toLowerCase();
+    const query = search.toLowerCase();
+    const roomsStr = Array.isArray(r.room) ? r.room.join(' ') : String(r.room || '');
     return (
-      r.name.toLowerCase().includes(q) ||
-      (r.place && r.place.toLowerCase().includes(q)) ||
-      (Array.isArray(r.room) ? r.room.some(num => String(num).includes(q)) : String(r.room).includes(q)) ||
-      r.date.includes(q)
+      r.name.toLowerCase().includes(query) ||
+      (r.place && r.place.toLowerCase().includes(query)) ||
+      roomsStr.includes(query) ||
+      r.date.includes(query)
     );
   });
 
   return (
     <div>
-      <div>
-        <div style={{ paddingBottom: 10 }} className="title">Reservations</div>
-      </div>
+      <div className="title" style={{ paddingBottom: 10 }}>Reservations</div>
       <form style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} onSubmit={addReservation}>
-        <input
-          className="input"
-          placeholder="Guest name"
-          value={form.name}
-          onChange={e => setForm({ ...form, name: e.target.value })}
-        />
-        <input
-          className="input"
-          placeholder="Place"
-          value={form.place}
-          onChange={e => setForm({ ...form, place: e.target.value })}
-        />
+        <input className="input" placeholder="Guest name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+        <input className="input" placeholder="Place" value={form.place} onChange={e => setForm({ ...form, place: e.target.value })} />
         <input
           className="input"
           type="date"
@@ -2982,45 +2951,33 @@ function Reservations({ state, setState }) {
             updateAvailableRooms(e.target.value);
           }}
         />
-        {/* Multi-select dropdown for rooms */}
         <select
-          className="input"
           multiple
+          className="input"
           value={form.room}
-          onChange={e => {
-            const opts = Array.from(e.target.selectedOptions).map(opt => opt.value);
-            setForm({ ...form, room: opts });
-          }}
           disabled={!form.date}
+          onChange={e => {
+            const selected = Array.from(e.target.selectedOptions).map(o => o.value);
+            setForm({ ...form, room: selected });
+          }}
         >
+          <option value="" disabled>Select one or more rooms</option>
           {availableRooms.map(num => (
-            <option key={num} value={num}>
-              {num} — Floor {String(num)[0]}
-            </option>
+            <option key={num} value={num}>{num} — Floor {String(num)[0]}</option>
           ))}
         </select>
         <button className="btn primary" type="submit">Add</button>
       </form>
-      <input
-        className="input"
-        style={{ marginBottom: 12 }}
-        placeholder="Search reservations by name, place, room, or date"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-      />
+
+      <input className="input" placeholder="Search reservations by name, place, room, or date" value={search} onChange={e => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
+
       <div className="list">
-        {(!state.reservations || state.reservations.length === 0) && (
-          <div style={{ color: 'var(--muted)' }}>No reservations</div>
-        )}
+        {filteredReservations.length === 0 && <div style={{ color: 'var(--muted)' }}>No reservations</div>}
         {filteredReservations.map((r, i) => (
-          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', padding: 12, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', background: '#fff', border: '1px solid var(--muted)' }}>
             <div>
-              <div style={{ fontWeight: 700 }}>
-                {r.name} - <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{r.place}</span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Room {Array.isArray(r.room) ? r.room.join(', ') : r.room} — {r.date}
-              </div>
+              <div style={{ fontWeight: '700' }}>{r.name} {r.place && <span style={{ color: 'var(--muted)', fontWeight: '700' }}> - {r.place}</span>}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {Array.isArray(r.room) ? r.room.join(', ') : r.room} — {r.date}</div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn primary" onClick={() => checkInReservation(r)}>Check-In</button>
@@ -3032,6 +2989,7 @@ function Reservations({ state, setState }) {
     </div>
   );
 }
+
 
 
 // --- Backend mirror helpers for LiveUpdate sync ---

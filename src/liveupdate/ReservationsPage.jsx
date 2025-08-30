@@ -13,11 +13,7 @@ export default function ReservationsPage({ data }) {
 
   const list = useMemo(() => {
     const arr = (data?.reservations || []).slice();
-    arr.sort((a, b) => {
-      const ta = new Date(a.date || 0).getTime();
-      const tb = new Date(b.date || 0).getTime();
-      return tb - ta;
-    });
+    arr.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
     return arr;
   }, [data]);
 
@@ -30,13 +26,9 @@ export default function ReservationsPage({ data }) {
       const name = String(r.name || '').toLowerCase();
       const place = String(r.place || '').toLowerCase();
       const date = String(r.date || '');
-      // Handle room as array or single value for search
       const roomStr = Array.isArray(r.room) ? r.room.join(', ') : String(r.room || '');
       return (
-        name.includes(s) ||
-        place.includes(s) ||
-        roomStr.includes(s) ||
-        date.includes(s)
+        name.includes(s) || place.includes(s) || roomStr.includes(s) || date.includes(s)
       );
     });
   }, [q, list]);
@@ -58,7 +50,7 @@ export default function ReservationsPage({ data }) {
           placeholder="Search by name/place/room/date"
           className="w-full px-3 py-2 border rounded-md text-sm"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={e => setQ(e.target.value)}
           style={{ borderColor: COLORS.border }}
         />
       </div>
@@ -69,19 +61,11 @@ export default function ReservationsPage({ data }) {
           <div
             key={i}
             className="card"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: 12,
-              borderRadius: 12,
-              boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-              border: `1px solid ${COLORS.border}`,
-              background: '#fff'
-            }}
+            style={{ display: 'flex', justifyContent: 'space-between', padding: 12, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: `1px solid ${COLORS.border}`, background: '#fff' }}
           >
             <div>
               <div style={{ fontWeight: 900, color: COLORS.deep }}>
-                {r.name} {r.place ? <span style={{ color: COLORS.muted, fontWeight: 700 }}> - {r.place}</span> : null}
+                {r.name} {r.place && <span style={{ color: COLORS.muted, fontWeight: 700 }}> - {r.place}</span>}
               </div>
               <div style={{ fontSize: 12, color: COLORS.muted }}>
                 Room {Array.isArray(r.room) ? r.room.join(', ') : r.room} — {r.date}
