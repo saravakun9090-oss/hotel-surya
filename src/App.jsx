@@ -502,6 +502,7 @@ Object.keys(state.floors).forEach(floorNum => {
 
 
 
+
   useEffect(() => {
   (async () => {
     // Group occupied rooms by guest (name + checkIn) so multi-room bookings appear as one entry
@@ -1755,30 +1756,31 @@ const submit = async (e) => {
           </div>
 
           {Object.keys(roomsByFloor).map(floorNum => (
-            <div key={floorNum} style={{ marginBottom: 14 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-                Floor {floorNum}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-                {roomsByFloor[floorNum].map(r => (
-                  <div
-                    key={r.number}
-                    style={roomBoxStyle(r)}
-                    title={
-                      r.status === 'reserved'
-                        ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
-                        : r.status === 'occupied'
-                        ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
-                        : 'Free'
-                    }
-                    onClick={() => handleRoomClick(r)}
-                  >
-                    {r.number}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+  <div key={floorNum} style={{ marginBottom: 14 }}>
+    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
+      Floor {floorNum}
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+      {roomsByFloor[floorNum].map(r => (
+        <div
+          key={r.number}
+          style={roomBoxStyle(r)}
+          title={
+            r.status === 'reserved'
+              ? `Reserved for: ${r.reservedFor?.name || 'Guest'}`
+              : r.status === 'occupied'
+              ? `Occupied by: ${r.guest?.name || 'Guest'}\nContact: ${r.guest?.contact || '-'}\nCheck-in: ${r.guest?.checkInDate || '-'} ${r.guest?.checkInTime || ''}`
+              : 'Free'
+          }
+          onClick={() => handleRoomClick(r)}
+        >
+          {r.number}
+        </div>
+      ))}
+    </div>
+  </div>
+))}
+
         </div>
       </div>
 
@@ -2970,7 +2972,7 @@ const addReservation = async (e) => {
   // Filter reservations
   const filteredReservations = (state.reservations || []).filter(r => {
     const query = search.toLowerCase();
-    const roomsStr = Array.isArray(r.room) ? r.room.join(' ') : String(r.room || '');
+    const roomsStr = Array.isArray(r.room) ? r.room.map(x => String(x)).join(' ') : String(r.room || '');
     return (
       r.name.toLowerCase().includes(query) ||
       (r.place && r.place.toLowerCase().includes(query)) ||
@@ -3020,7 +3022,8 @@ const addReservation = async (e) => {
           <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between', padding: 12, borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', background: '#fff', border: '1px solid var(--muted)' }}>
             <div>
               <div style={{ fontWeight: '700' }}>{r.name} {r.place && <span style={{ color: 'var(--muted)', fontWeight: '700' }}> - {r.place}</span>}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {Array.isArray(r.room) ? r.room.join(', ') : r.room} — {r.date}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Room {Array.isArray(r.room) ? r.room.map(x => String(x)).join(', ') : String(r.room || '')}
+ — {r.date}</div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn primary" onClick={() => checkInReservation(r)}>Check-In</button>
