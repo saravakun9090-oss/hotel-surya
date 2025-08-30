@@ -476,16 +476,35 @@ function CheckIn({ state, setState, locationState }) {
     }
   }, [location.state]);
 
-  // Build room grid
-  const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
-  const roomsByFloor = {};
-  Object.keys(state.floors).forEach(floorNum => {
-    roomsByFloor[floorNum] = state.floors[floorNum].map(r => {
-      const res = reservationsToday.find(rr => rr.room === r.number);
-      if (res && r.status === "free") return { ...r, status: "reserved", reservedFor: res };
-      return r;
+// Extract reservations for today
+const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
+
+// Build rooms by floor with correct reservation status handling multiple rooms per reservation
+const roomsByFloor = {};
+Object.keys(state.floors).forEach(floorNum => {
+  roomsByFloor[floorNum] = state.floors[floorNum].map(room => {
+    const roomNum = room.number;
+
+    // Find a reservation (for today) that includes this room number (support array rooms)
+    const reservation = reservationsToday.find(res => {
+      if (Array.isArray(res.room)) {
+        return res.room.includes(roomNum);
+      }
+      return res.room === roomNum;
     });
+
+    // Mark as reserved if free and reservation exists
+    if (reservation && room.status === 'free') {
+      return {
+        ...room,
+        status: 'reserved',
+        reservedFor: reservation
+      };
+    }
+    return room;
   });
+});
+
 
   useEffect(() => {
   (async () => {
