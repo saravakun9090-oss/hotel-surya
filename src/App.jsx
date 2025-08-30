@@ -1387,38 +1387,52 @@ async function saveEditChanges() {
   });
 
   // Remove matching reservations for any of the rooms checked-in
- const todayISO = (new Date()).toISOString().slice(0,10);
+const todayISO = (new Date()).toISOString().slice(0,10);
 const roomsSet = new Set(roomsToOccupy.map(Number));
+
+// Find all reservations that overlap ANY checked-in room for today
 const reservationMatches = (state.reservations || []).filter(
-  r => roomsSet.has(Number(r.room)) && r.date === todayISO
+  r =>
+    Array.isArray(r.room)
+      ? r.room.some(roomNum => roomsSet.has(Number(roomNum)))
+      : roomsSet.has(Number(r.room))
+    && r.date === todayISO
 );
 
 if (reservationMatches.length) {
+  // Remove all matching reservations (person+date overlap with checked-in rooms)
   newState.reservations = (state.reservations || []).filter(
-    r => !(roomsSet.has(Number(r.room)) && r.date === todayISO)
+    r =>
+      !(Array.isArray(r.room)
+        ? r.room.some(roomNum => roomsSet.has(Number(roomNum)))
+        : roomsSet.has(Number(r.room))
+      && r.date === todayISO)
   );
 
-  // Delete reservation files on disk (already present)
+  // Delete reservation files on disk for each room in each matching reservation
   for (const rm of reservationMatches) {
-    await deleteReservationFile(rm.date, rm.room, rm.name);
+    if (Array.isArray(rm.room)) {
+      for (const roomNum of rm.room) {
+        await deleteReservationFile(rm.date, roomNum, rm.name);
+      }
+    } else {
+      await deleteReservationFile(rm.date, rm.room, rm.name);
+    }
   }
 
-  // Mirror deletion to Mongo by composite key
+  // Mirror deletion to Mongo by name+date (not room, since all rooms in doc)
   try {
     const API_BASE =
       window.MONGO_API_BASE ||
       (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
       '/api';
-
-    // Fire sequentially to preserve order; or Promise.all if parallel is OK
     for (const rm of reservationMatches) {
       await fetch(`${API_BASE}/reservation`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: String(rm.name || '').trim(),
-          room: Number(rm.room),
-          date: String(rm.date || '').slice(0,10)
+          date: String(rm.date || '').slice(0,10) // No room needed since doc holds array
         })
       }).catch(() => {});
     }
@@ -1426,6 +1440,7 @@ if (reservationMatches.length) {
     // best-effort; ignore failures
   }
 }
+
 
 
   // One and only server call: POST if no id, else PUT by id
