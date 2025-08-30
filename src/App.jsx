@@ -476,28 +476,28 @@ function CheckIn({ state, setState, locationState }) {
     }
   }, [location.state]);
 
-// Extract reservations for today
 const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
 
-// Build rooms by floor, mark reserved appropriately
-const roomsByFloor = {};
-Object.keys(state.floors).forEach(floorNum => {
-  roomsByFloor[floorNum] = state.floors[floorNum].map(room => {
-    const roomNum = Number(room.number);
-    // Find reservation if any for this room number (checking arrays)
-    const reservation = reservationsToday.find(res => {
-      if (Array.isArray(res.room)) {
-        return res.room.some(rn => Number(rn) === roomNum);
+const roomsByFloor = React.useMemo(() => {
+  const map = {};
+  Object.keys(state.floors).forEach(floorNum => {
+    map[floorNum] = state.floors[floorNum].map(room => {
+      const roomNum = Number(room.number);
+      const reservation = reservationsToday.find(res => {
+        if (Array.isArray(res.room)) {
+          return res.room.some(rn => Number(rn) === roomNum);
+        }
+        return Number(res.room) === roomNum;
+      });
+      if (reservation && room.status === "free") {
+        return { ...room, status: "reserved", reservedFor: reservation };
       }
-      return Number(res.room) === roomNum;
+      return { ...room, number: roomNum };
     });
-    // Mark reserved if free and reserved
-    if (reservation && room.status === "free") {
-      return { ...room, status: "reserved", reservedFor: reservation };
-    }
-    return { ...room, number: roomNum };
   });
-});
+  return map;
+}, [state.floors, state.reservations, todayISO]);
+
 
 
 
