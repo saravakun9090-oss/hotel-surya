@@ -2803,144 +2803,133 @@ async function deleteReservationFile(date, room, name) {
 
 
 function Reservations({ state, setState }) {
-  const [form, setForm] = useState({ name: '', place: '', room: '', date: '' });
+  const [form, setForm] = useState({ name: '', place: '', room: [], date: '' });
   const [availableRooms, setAvailableRooms] = useState([]);
-  const [search, setSearch] = useState(""); // 🔍 search query
+  const [search, setSearch] = useState("");
 
-  
   // --- Calculate available rooms for a given date ---
   const updateAvailableRooms = (selectedDate) => {
     if (!selectedDate) {
       setAvailableRooms([]);
       return;
     }
-
     const rooms = [];
-
     for (const floor of Object.values(state.floors)) {
       for (const room of floor) {
         const isOccupied = room.status === 'occupied';
         const isReservedThatDate = (state.reservations || []).some(
           r => r.room === room.number && r.date === selectedDate
         );
-
         if (!isOccupied && !isReservedThatDate) {
           rooms.push(room.number);
         }
       }
     }
-
     setAvailableRooms(rooms);
   };
 
-  // Add new reservation
+  // Add new reservation (multiple rooms)
   const addReservation = async (e) => {
-e.preventDefault();
-if (!form.name || !form.place || !form.room || !form.date) {
-return alert('Please fill all fields');
-}
-
-const resObj = {
-name: form.name,
-place: form.place,
-room: Number(form.room),
-date: form.date,
-};
-
-const newState = { ...state };
-if (!newState.reservations) newState.reservations = [];
-newState.reservations.push(resObj);
-
-setForm({ name: '', place: '', room: '', date: '' });
-
-setState(newState);
-saveState(newState);
-// In App, after setState(newState) and saveState(newState):
-try {
-  if ('BroadcastChannel' in window) {
-    const bc = new BroadcastChannel('hotel_state');
-    bc.postMessage({ type: 'state:update', state: newState });
-    bc.close();
-  }
-} catch {}
-
-
-persistReservation(resObj);
-
-// MIRROR: reservation event (non-blocking)
-try {
-const API_BASE =
-window.MONGO_API_BASE ||
-(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-'/api';
-await fetch(`${API_BASE}/reservation`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: resObj.name,
-    place: resObj.place || '',
-    room: Number(resObj.room),
-    date: resObj.date
-  })
-}).catch(() => {});
-} catch (_) {
-// ignore mirror failures
-}
-};
-
-  // Delete reservation with confirmation + disk removal
-  const deleteReservation = async (i) => {
-  const res = state.reservations[i];
-  if (!res) return;
-
-  const confirmed = window.confirm(
-    `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRoom: ${res.room}\nDate: ${res.date}`
-  );
-  if (!confirmed) return;
-
-  const newState = { ...state };
-  newState.reservations.splice(i, 1);
-  setState(newState);
-  saveState(newState);
-  try {
-    if ('BroadcastChannel' in window) {
-      const bc = new BroadcastChannel('hotel_state');
-      bc.postMessage({ type: 'state:update', state: newState });
-      bc.close();
+    e.preventDefault();
+    if (!form.name || !form.place || !form.room.length || !form.date) {
+      return alert('Please fill all fields, and select at least one room');
     }
-  } catch {}
+    // Add each room as a reservation entry
+    const resObjs = form.room.map(roomNum => ({
+      name: form.name,
+      place: form.place,
+      room: Number(roomNum),
+      date: form.date,
+    }));
+    const newState = { ...state };
+    if (!newState.reservations) newState.reservations = [];
+    newState.reservations.push(...resObjs);
+    setForm({ name: '', place: '', room: [], date: '' });
+    setState(newState);
+    saveState(newState);
+    // Broadcast mirror
+    try {
+      if ('BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('hotel_state');
+        bc.postMessage({ type: 'state:update', state: newState });
+        bc.close();
+      }
+    } catch {}
+    for (const r of resObjs) await persistReservation(r);
+    // Call backend once for all rooms
+    try {
+      const API_BASE =
+        window.MONGO_API_BASE ||
+        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+        '/api';
+      await fetch(`${API_BASE}/reservation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          place: form.place || '',
+          room: form.room.map(Number),
+          date: form.date
+        })
+      }).catch(() => {});
+    } catch (_) {}
+  };
 
-  await deleteReservationFile(res.date, res.room, res.name);
-
-  // also delete from Mongo by composite key
-  try {
-    const API_BASE =
-      window.MONGO_API_BASE ||
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
-      '/api';
-    await fetch(`${API_BASE}/reservation`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: String(res.name || '').trim(),
-        room: Number(res.room),
-        date: String(res.date || '').slice(0,10)
-      })
-    }).catch(() => {});
-  } catch {}
-};
-
+  // Delete all reservations for selected guest, date, and selected rooms
+  const deleteReservation = async (i) => {
+    const res = state.reservations[i];
+    if (!res) return;
+    // Find all reservations for this person/date
+    const targetName = res.name;
+    const targetDate = res.date;
+    const relatedRooms = state.reservations
+      .filter(r => r.name === targetName && r.date === targetDate)
+      .map(r => r.room);
+    const confirmed = window.confirm(
+      `Delete reservation(s)?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRooms: ${relatedRooms.join(', ')}\nDate: ${res.date}`
+    );
+    if (!confirmed) return;
+    const newState = { ...state };
+    newState.reservations = newState.reservations.filter(
+      r => !(r.name === targetName && r.date === targetDate)
+    );
+    setState(newState);
+    saveState(newState);
+    try {
+      if ('BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('hotel_state');
+        bc.postMessage({ type: 'state:update', state: newState });
+        bc.close();
+      }
+    } catch {}
+    for (const roomNum of relatedRooms) await deleteReservationFile(res.date, roomNum, res.name);
+    // delete in backend
+    try {
+      const API_BASE =
+        window.MONGO_API_BASE ||
+        (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_MONGO_API_BASE) ||
+        '/api';
+      await fetch(`${API_BASE}/reservation`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: String(res.name || '').trim(),
+          room: relatedRooms,
+          date: String(res.date || '').slice(0, 10)
+        })
+      }).catch(() => {});
+    } catch {}
+  };
 
   const navigate = useNavigate();
-
-const checkInReservation = (res) => {
-  navigate('/checkin', {
-    state: {
-      prefName: res.name,
-      prefRoom: res.room
-    }
-  });
-};
+  const checkInReservation = (res) => {
+    navigate('/checkin', {
+      state: {
+        prefName: res.name,
+        prefRoom: res.room
+      }
+    });
+  };
 
   // 🔍 Filter reservations based on search box
   const filteredReservations = (state.reservations || []).filter(r => {
@@ -2953,11 +2942,12 @@ const checkInReservation = (res) => {
     );
   });
 
+  // Rooms multi-select input
   return (
     <div>
       <div>
-          <div style={{ paddingBottom: 10}} className="title">Reservations</div>
-        </div>
+        <div style={{ paddingBottom: 10}} className="title">Reservations</div>
+      </div>
       <form style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} onSubmit={addReservation}>
         <input
           className="input"
@@ -2971,37 +2961,33 @@ const checkInReservation = (res) => {
           value={form.place}
           onChange={e => setForm({ ...form, place: e.target.value })}
         />
-
-        {/* Select date first */}
         <input
           className="input"
           type="date"
           value={form.date}
           onChange={e => {
-            setForm({ ...form, date: e.target.value, room: '' });
+            setForm({ ...form, date: e.target.value, room: [] });
             updateAvailableRooms(e.target.value);
           }}
         />
-
-        {/* Room dropdown */}
         <select
           className="input"
+          multiple
           value={form.room}
-          onChange={e => setForm({ ...form, room: e.target.value })}
+          onChange={e => {
+            const opts = Array.from(e.target.selectedOptions).map(opt => opt.value);
+            setForm({ ...form, room: opts });
+          }}
           disabled={!form.date}
         >
-          <option value="">Select a free room</option>
           {availableRooms.map(num => (
             <option key={num} value={num}>
               {num} — Floor {String(num)[0]}
             </option>
           ))}
         </select>
-
         <button className="btn primary" type="submit">Add</button>
       </form>
-
-       {/* 🔍 Search Box */}
       <input
         className="input"
         style={{ marginBottom: 12 }}
@@ -3009,13 +2995,11 @@ const checkInReservation = (res) => {
         value={search}
         onChange={e => setSearch(e.target.value)}
       />
-
-
       <div className="list">
         {(!state.reservations || state.reservations.length === 0) && (
           <div style={{ color: 'var(--muted)' }}>No reservations</div>
         )}
-        {state.reservations && state.reservations.map((r, i) => (
+        {filteredReservations.map((r, i) => (
           <div key={i} className="card" style={{ display: 'flex', justifyContent: 'space-between' }}>
             <div>
               <div style={{ fontWeight: 700 }}>
@@ -3035,6 +3019,7 @@ const checkInReservation = (res) => {
     </div>
   );
 }
+
 
 // --- Backend mirror helpers for LiveUpdate sync ---
 // Reuse the same API_BASE resolution pattern used elsewhere

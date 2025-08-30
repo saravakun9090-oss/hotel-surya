@@ -514,51 +514,52 @@ app.post('/api/reservation', async (req, res) => {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     const b = req.body || {};
-    const doc = {
+    // Accept array of rooms; fallback to single room
+    const rooms = Array.isArray(b.room)
+      ? b.room.map(Number).filter(Boolean)
+      : [Number(b.room)].filter(Boolean);
+    if (!rooms.length) return res.status(400).json({ ok: false, error: 'missing room(s)' });
+    const docs = rooms.map(roomNum => ({
       name: String(b.name || '').trim(),
       place: String(b.place || '').trim(),
-      room: Number(b.room) || 0,
+      room: roomNum,
       date: String(b.date || '').slice(0, 10),
       createdAt: new Date().toISOString()
-    };
-    const r = await reservationsCol.insertOne(doc);
+    }));
+    const r = await reservationsCol.insertMany(docs);
     // Future: sseBroadcast('reservations', {...}) if adding client channel
-    res.json({ ok: true, id: String(r.insertedId) });
+    res.json({ ok: true, ids: Object.values(r.insertedIds).map(id => String(id)) });
   } catch (e) {
     console.error('POST /api/reservation failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Reservation delete
-// Reservation delete by composite key: name + room + date
+// Reservation delete for multiple rooms under one person + date
 app.delete('/api/reservation', async (req, res) => {
   try {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
-
     const b = req.body || {};
     const name = String(b.name || '').trim();
-    const room = Number(b.room);
+    const rooms = Array.isArray(b.room)
+      ? b.room.map(Number).filter(Boolean)
+      : [Number(b.room)].filter(Boolean);
     const date = String(b.date || '').slice(0, 10);
-
-    if (!name || !room || !date) {
-      return res.status(400).json({ ok: false, error: 'missing name, room, or date' });
+    if (!name || !rooms.length || !date) {
+      return res.status(400).json({ ok: false, error: 'missing name, room(s), or date' });
     }
-
-    // Optional: normalize collation for case-insensitive name match if needed:
-    // const result = await reservationsCol.deleteOne({ name, room, date }, { collation: { locale: 'en', strength: 2 } });
-
-    const result = await reservationsCol.deleteOne({ name, room, date });
+    const result = await reservationsCol.deleteMany({ name, room: { $in: rooms }, date });
     if (!result.deletedCount) {
       return res.status(404).json({ ok: false, error: 'not found' });
     }
     res.json({ ok: true, deleted: result.deletedCount });
   } catch (e) {
-    console.error('DELETE /api/reservation (composite) failed:', e);
+    console.error('DELETE /api/reservation (multi-room) failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
 
 
 // Optional: record a checkout (MongoDB checkouts collection)
