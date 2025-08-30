@@ -186,9 +186,6 @@ const todayISO = ymd();
   }
   const recent = Array.from(recentMap.values()).map(x => ({ guest: x.guest, room: x.rooms.join(', ') }));
 
-  // Today's reservations
-  
-  const todaysReservations = (state.reservations || []).filter(res => res.date === todayISO);
 
   const navigate = useNavigate();
 
@@ -201,20 +198,24 @@ const checkInReservation = (res) => {
   });
 };
 
-  // Room layout: mark today's reservations
-  const layoutFloors = {};
-  Object.keys(floors).forEach(floorNum => {
-    layoutFloors[floorNum] = floors[floorNum].map(r => {
-      const res = todaysReservations.find(rr => 
-  Array.isArray(rr.room) ? rr.room.includes(r.number) : rr.room === r.number
-);
+const reservationsToday = (state.reservations || []).filter(res => res.date === todayISO);
 
-      if (res && r.status === "free") {
-        return { ...r, status: "reserved" }; // mark reserved
+Object.keys(floors).forEach(floorNum => {
+  roomsByFloor[floorNum] = floors[floorNum].map(room => {
+    const roomNum = Number(room.number);
+    const reservation = reservationsToday.find(res => {
+      if (Array.isArray(res.room)) {
+        return res.room.some(rn => Number(rn) === roomNum);
       }
-      return r;
+      return Number(res.room) === roomNum;
     });
+    if (reservation && room.status === "free") {
+      return { ...room, status: "reserved", reservedFor: reservation };
+    }
+    return room;
   });
+});
+
 
  
 
