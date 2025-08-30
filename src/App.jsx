@@ -205,7 +205,10 @@ const checkInReservation = (res) => {
   const layoutFloors = {};
   Object.keys(floors).forEach(floorNum => {
     layoutFloors[floorNum] = floors[floorNum].map(r => {
-      const res = todaysReservations.find(rr => rr.room === r.number);
+      const res = todaysReservations.find(rr => 
+  Array.isArray(rr.room) ? rr.room.includes(r.number) : rr.room === r.number
+);
+
       if (res && r.status === "free") {
         return { ...r, status: "reserved" }; // mark reserved
       }
@@ -478,25 +481,25 @@ function CheckIn({ state, setState, locationState }) {
 
 const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
 
-const roomsByFloor = React.useMemo(() => {
-  const map = {};
-  Object.keys(state.floors).forEach(floorNum => {
-    map[floorNum] = state.floors[floorNum].map(room => {
-      const roomNum = Number(room.number);
-      const reservation = reservationsToday.find(res => {
-        if (Array.isArray(res.room)) {
-          return res.room.some(rn => Number(rn) === roomNum);
-        }
-        return Number(res.room) === roomNum;
-      });
-      if (reservation && room.status === "free") {
-        return { ...room, status: "reserved", reservedFor: reservation };
+const roomsByFloor = {};
+Object.keys(state.floors).forEach(floorNum => {
+  roomsByFloor[floorNum] = state.floors[floorNum].map(room => {
+    const roomNum = Number(room.number);
+    // Find reservation if any for this room number (checking arrays)
+    const reservation = reservationsToday.find(res => {
+      if (Array.isArray(res.room)) {
+        return res.room.some(rn => Number(rn) === roomNum);
       }
-      return { ...room, number: roomNum };
+      return Number(res.room) === roomNum;
     });
+    // Mark reserved if free and reserved
+    if (reservation && room.status === "free") {
+      return { ...room, status: "reserved", reservedFor: reservation };
+    }
+    return {...room, number: roomNum};
   });
-  return map;
-}, [state.floors, state.reservations, todayISO]);
+});
+
 
 
 
@@ -1417,14 +1420,14 @@ const submit = async (e) => {
   });
 
   // Remove conflicting reservations for these rooms on today's date
-  const roomsSet = new Set(roomsToOccupy);
   const reservationConflicts = (state.reservations || []).filter(
-    res => res.date === todayISO && (
-      Array.isArray(res.room)
-        ? res.room.some(rn => roomsSet.has(Number(rn)))
-        : roomsSet.has(Number(res.room))
-    )
-  );
+  res => res.date === todayISO && (
+    Array.isArray(res.room)
+      ? res.room.some(rn => roomsSet.has(Number(rn)))
+      : roomsSet.has(Number(res.room))
+  )
+);
+
 
   if (reservationConflicts.length > 0) {
     newState.reservations = (state.reservations || []).filter(
