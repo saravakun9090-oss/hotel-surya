@@ -2813,13 +2813,14 @@ function Reservations({ state, setState }) {
       setAvailableRooms([]);
       return;
     }
+    const reservedRooms = (state.reservations || []).filter(
+      r => r.date === selectedDate
+    ).flatMap(r => Array.isArray(r.room) ? r.room : [r.room]);
     const rooms = [];
     for (const floor of Object.values(state.floors)) {
       for (const room of floor) {
         const isOccupied = room.status === 'occupied';
-        const isReservedThatDate = (state.reservations || []).some(
-          r => r.room === room.number && r.date === selectedDate
-        );
+        const isReservedThatDate = reservedRooms.includes(room.number);
         if (!isOccupied && !isReservedThatDate) {
           rooms.push(room.number);
         }
@@ -2828,26 +2829,30 @@ function Reservations({ state, setState }) {
     setAvailableRooms(rooms);
   };
 
-  // Add new reservation (multiple rooms)
+  // Add new reservation (multiple rooms!)
   const addReservation = async (e) => {
     e.preventDefault();
     if (!form.name || !form.place || !form.room.length || !form.date) {
-      return alert('Please fill all fields, and select at least one room');
+      return alert('Please fill all fields and select at least one room');
     }
-    // Add each room as a reservation entry
-    const resObjs = form.room.map(roomNum => ({
+    // Only allow one reservation per person/date
+    const resObj = {
       name: form.name,
       place: form.place,
-      room: Number(roomNum),
+      room: form.room.map(Number),
       date: form.date,
-    }));
+    };
     const newState = { ...state };
     if (!newState.reservations) newState.reservations = [];
-    newState.reservations.push(...resObjs);
+    // Remove previous reservations for this guest+date
+    newState.reservations = newState.reservations.filter(
+      r => !(r.name === resObj.name && r.date === resObj.date)
+    );
+    newState.reservations.push(resObj);
     setForm({ name: '', place: '', room: [], date: '' });
     setState(newState);
     saveState(newState);
-    // Broadcast mirror
+
     try {
       if ('BroadcastChannel' in window) {
         const bc = new BroadcastChannel('hotel_state');
@@ -2855,8 +2860,9 @@ function Reservations({ state, setState }) {
         bc.close();
       }
     } catch {}
-    for (const r of resObjs) await persistReservation(r);
-    // Call backend once for all rooms
+    await persistReservation(resObj);
+
+    // Call backend
     try {
       const API_BASE =
         window.MONGO_API_BASE ||
@@ -2865,34 +2871,21 @@ function Reservations({ state, setState }) {
       await fetch(`${API_BASE}/reservation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: form.name,
-          place: form.place || '',
-          room: form.room.map(Number),
-          date: form.date
-        })
+        body: JSON.stringify(resObj)
       }).catch(() => {});
     } catch (_) {}
   };
 
-  // Delete all reservations for selected guest, date, and selected rooms
+  // Delete reservation (all rooms for person/date)
   const deleteReservation = async (i) => {
     const res = state.reservations[i];
     if (!res) return;
-    // Find all reservations for this person/date
-    const targetName = res.name;
-    const targetDate = res.date;
-    const relatedRooms = state.reservations
-      .filter(r => r.name === targetName && r.date === targetDate)
-      .map(r => r.room);
     const confirmed = window.confirm(
-      `Delete reservation(s)?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRooms: ${relatedRooms.join(', ')}\nDate: ${res.date}`
+      `Delete reservation?\n\nGuest: ${res.name}\nPlace: ${res.place || ''}\nRooms: ${Array.isArray(res.room) ? res.room.join(', ') : res.room}\nDate: ${res.date}`
     );
     if (!confirmed) return;
     const newState = { ...state };
-    newState.reservations = newState.reservations.filter(
-      r => !(r.name === targetName && r.date === targetDate)
-    );
+    newState.reservations.splice(i, 1);
     setState(newState);
     saveState(newState);
     try {
@@ -2902,7 +2895,12 @@ function Reservations({ state, setState }) {
         bc.close();
       }
     } catch {}
-    for (const roomNum of relatedRooms) await deleteReservationFile(res.date, roomNum, res.name);
+    if (Array.isArray(res.room)) {
+      for (const roomNum of res.room)
+        await deleteReservationFile(res.date, roomNum, res.name);
+    } else {
+      await deleteReservationFile(res.date, res.room, res.name);
+    }
     // delete in backend
     try {
       const API_BASE =
@@ -2914,7 +2912,6 @@ function Reservations({ state, setState }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: String(res.name || '').trim(),
-          room: relatedRooms,
           date: String(res.date || '').slice(0, 10)
         })
       }).catch(() => {});
@@ -2923,6 +2920,7 @@ function Reservations({ state, setState }) {
 
   const navigate = useNavigate();
   const checkInReservation = (res) => {
+    // Assumes single-room check-in for now; adapt for batch check-in if needed
     navigate('/checkin', {
       state: {
         prefName: res.name,
@@ -2937,16 +2935,15 @@ function Reservations({ state, setState }) {
     return (
       r.name.toLowerCase().includes(q) ||
       (r.place && r.place.toLowerCase().includes(q)) ||
-      String(r.room).includes(q) ||
+      (Array.isArray(r.room) ? r.room.some(num => String(num).includes(q)) : String(r.room).includes(q)) ||
       r.date.includes(q)
     );
   });
 
-  // Rooms multi-select input
   return (
     <div>
       <div>
-        <div style={{ paddingBottom: 10}} className="title">Reservations</div>
+        <div style={{ paddingBottom: 10 }} className="title">Reservations</div>
       </div>
       <form style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }} onSubmit={addReservation}>
         <input
@@ -2970,6 +2967,7 @@ function Reservations({ state, setState }) {
             updateAvailableRooms(e.target.value);
           }}
         />
+        {/* Multi-select dropdown for rooms */}
         <select
           className="input"
           multiple
@@ -3006,7 +3004,7 @@ function Reservations({ state, setState }) {
                 {r.name} - <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{r.place}</span>
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Room {r.room} — {r.date}
+                Room {Array.isArray(r.room) ? r.room.join(', ') : r.room} — {r.date}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>

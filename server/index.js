@@ -508,54 +508,53 @@ app.put('/api/checkin/:id', async (req, res) => {
 
 
 
-// Reservation create (MongoDB reservations collection)
+// Reservation create (supports multiple rooms as array)
 app.post('/api/reservation', async (req, res) => {
   try {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     const b = req.body || {};
-    // Accept array of rooms; fallback to single room
+    // Extract and normalize rooms as array of numbers
     const rooms = Array.isArray(b.room)
       ? b.room.map(Number).filter(Boolean)
-      : [Number(b.room)].filter(Boolean);
-    if (!rooms.length) return res.status(400).json({ ok: false, error: 'missing room(s)' });
-    const docs = rooms.map(roomNum => ({
+      : String(b.room).split(',').map(x => Number(x.trim())).filter(Boolean);
+    if (!b.name || !rooms.length || !b.date) {
+      return res.status(400).json({ ok: false, error: 'missing required fields' });
+    }
+    const doc = {
       name: String(b.name || '').trim(),
       place: String(b.place || '').trim(),
-      room: roomNum,
+      room: rooms, // Save array
       date: String(b.date || '').slice(0, 10),
       createdAt: new Date().toISOString()
-    }));
-    const r = await reservationsCol.insertMany(docs);
-    // Future: sseBroadcast('reservations', {...}) if adding client channel
-    res.json({ ok: true, ids: Object.values(r.insertedIds).map(id => String(id)) });
+    };
+    const r = await reservationsCol.insertOne(doc);
+    res.json({ ok: true, id: String(r.insertedId) });
   } catch (e) {
     console.error('POST /api/reservation failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Reservation delete for multiple rooms under one person + date
+// Reservation delete for one person/date (remove matching document; supports array)
 app.delete('/api/reservation', async (req, res) => {
   try {
     await ensureDb();
     if (!reservationsCol) return res.status(503).json({ ok: false, error: 'mongo not initialized' });
     const b = req.body || {};
     const name = String(b.name || '').trim();
-    const rooms = Array.isArray(b.room)
-      ? b.room.map(Number).filter(Boolean)
-      : [Number(b.room)].filter(Boolean);
     const date = String(b.date || '').slice(0, 10);
-    if (!name || !rooms.length || !date) {
-      return res.status(400).json({ ok: false, error: 'missing name, room(s), or date' });
+    if (!name || !date) {
+      return res.status(400).json({ ok: false, error: 'missing name or date' });
     }
-    const result = await reservationsCol.deleteMany({ name, room: { $in: rooms }, date });
+    // Remove by name + date
+    const result = await reservationsCol.deleteOne({ name, date });
     if (!result.deletedCount) {
       return res.status(404).json({ ok: false, error: 'not found' });
     }
     res.json({ ok: true, deleted: result.deletedCount });
   } catch (e) {
-    console.error('DELETE /api/reservation (multi-room) failed:', e);
+    console.error('DELETE /api/reservation failed:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
