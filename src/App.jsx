@@ -199,9 +199,9 @@ const checkInReservation = (res) => {
 };
 
 const reservationsToday = (state.reservations || []).filter(res => res.date === todayISO);
-
+  const layoutFloors = {};
 Object.keys(floors).forEach(floorNum => {
-  roomsByFloor[floorNum] = floors[floorNum].map(room => {
+  layoutFloors[floorNum] = floors[floorNum].map(room => {
     const roomNum = Number(room.number);
     const reservation = reservationsToday.find(res => {
       if (Array.isArray(res.room)) {
