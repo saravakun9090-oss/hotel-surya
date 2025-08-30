@@ -476,34 +476,36 @@ function CheckIn({ state, setState, locationState }) {
     }
   }, [location.state]);
 
-// Extract reservations for today
 const reservationsToday = (state.reservations || []).filter(r => r.date === todayISO);
 
-// Build rooms by floor with correct reservation status handling multiple rooms per reservation
 const roomsByFloor = {};
 Object.keys(state.floors).forEach(floorNum => {
   roomsByFloor[floorNum] = state.floors[floorNum].map(room => {
-    const roomNum = room.number;
+    const roomNum = Number(room.number);
 
-    // Find a reservation (for today) that includes this room number (support array rooms)
+    // Find a reservation that includes this room number, support arrays
     const reservation = reservationsToday.find(res => {
       if (Array.isArray(res.room)) {
-        return res.room.includes(roomNum);
+        return res.room.some(rn => Number(rn) === roomNum);
       }
-      return res.room === roomNum;
+      return Number(res.room) === roomNum;
     });
 
-    // Mark as reserved if free and reservation exists
-    if (reservation && room.status === 'free') {
+    // Mark reserved if free; otherwise keep original status
+    if (reservation) {
+      // Clone room with updated status and reservedFor info
       return {
         ...room,
-        status: 'reserved',
+        status: room.status === 'free' ? 'reserved' : room.status,
         reservedFor: reservation
       };
     }
-    return room;
+
+    // no matching reservation, return room as-is
+    return { ...room };
   });
 });
+
 
 
   useEffect(() => {
